@@ -1,0 +1,43 @@
+# --- BIOMETRIC DATA — never commit ------------------------------------------
+# These directories hold face images. Once a face photo enters git history it
+# is effectively permanent and un-erasable. This block exists from the first
+# commit deliberately; it is the only cheap moment to get it right.
+backend/calibration/data/
+backend/tests/assets/
+!backend/tests/assets/.gitkeep
+
+# --- model weights (fetched by scripts/download_models.sh) -------------------
+# Not committed: ~200MB, and the opt-in buffalo_l weights are
+# non-commercial-research licensed and must not live in a distributable artifact.
+models/
+!models/.gitkeep
+
+# --- python ------------------------------------------------------------------
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- node --------------------------------------------------------------------
+web/node_modules/
+web/build/
+web/dist/
+
+# --- env ---------------------------------------------------------------------
+.env
+*.env
+!.env.example
+!web/environments/.env.local
+!web/environments/.env.dev
+!web/environments/.env.prod
+
+# --- local data --------------------------------------------------------------
+data/
+uploads/
+docs/calibration/*.png
+
+.DS_Store
