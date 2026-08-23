@@ -15,8 +15,8 @@ endpoints. No face pipeline yet.
 | Phase | | |
 |---|---|---|
 | 1 | Scaffold, config, logging, health | done |
-| 2 | Model download + checksum verification | next |
-| 3 | Decode, alignment, quality metrics | |
+| 2 | Model download + checksum verification | done |
+| 3 | Decode, alignment, quality metrics | next |
 | 4 | YuNet + SFace adapter — **proves the core hypothesis** | |
 | 5–11 | Pipeline, DB, HTTP, users, security, frontend, Docker | |
 | 12 | **Threshold calibration** — V1 is not done until this runs | |
@@ -57,6 +57,43 @@ All dependencies are the latest stable release, resolved together and verified
 **Keep numpy, opencv-python-headless and onnxruntime moving together.** The whole
 stack is built against NumPy 2.x. Pinning numpy backwards without also pinning the
 other two produces `module compiled against API version 0x10` crashes at import.
+
+## Models
+
+```bash
+./scripts/download_models.sh            # fetch + verify the default pair
+./scripts/download_models.sh --verify   # check what is on disk, fetch nothing
+./scripts/download_models.sh --record   # regenerate the checksum manifest
+```
+
+Weights are checksum-pinned in `scripts/models.sha256` and the script fails closed
+on any mismatch — model weights are executable inputs that decide who gets verified
+as whom. The opencv_zoo source is pinned to a **commit**, not a branch: "version
+every model" means nothing if the bytes behind the name `2023mar` can change
+underneath you. Weights are never committed (`models/*` is ignored).
+
+| | bytes | licence |
+|---|---|---|
+| `face_detection_yunet_2023mar.onnx` | 232,589 | permissive — default |
+| `face_recognition_sface_2021dec.onnx` | 38,696,353 | permissive — default |
+| `insightface/buffalo_l/*` | ~183 MB | **non-commercial research only** — opt-in |
+
+### Verified behaviour of these two models
+
+Measured directly against OpenCV 5.0 on this stack, not assumed:
+
+- **`FaceRecognizerSF.feature()` returns an unnormalised vector** — measured L2 norm
+  **4.14**, not 1.0. `match(..., FR_COSINE)` normalises internally, which is why
+  dotting raw `feature()` output gives similarities in the tens. `embed()` must
+  normalise explicitly. Once normalised, our cosine agrees with `match()` exactly.
+- **`detect()` with no face returns `retval=1` and `faces=None`.** The return code
+  means "ran successfully", not "found something" — branch on `faces is None`, never
+  on `retval`, or you index into `None` on every faceless image.
+- OpenCV 5 logs `Targets are not supported by the new graph engine for now` at model
+  load. Cosmetic, from `setPreferableTarget`; both models load and infer correctly.
+- Cold cost on this machine: ~50 ms to load each model, ~10 ms `detect()` on
+  640×480, ~12 ms `feature()`. Unwarmed — first real inference is much slower, which
+  is why the engine pool warms at startup.
 
 ## Two things that will bite
 
