@@ -184,10 +184,22 @@ class TestPose:
         assert report.metrics["yaw_symmetry"] == pytest.approx(1.0, abs=0.02)
         assert ReasonCode.EXTREME_POSE not in report.issues
 
-    @pytest.mark.parametrize("offset", [0.35, -0.35, 0.6])
-    def test_turned_head_trips_extreme_pose(self, offset: float) -> None:
+    @pytest.mark.parametrize("offset", [0.45, -0.45, 0.6])
+    def test_severely_turned_head_trips_extreme_pose(self, offset: float) -> None:
         report = assess_quality(good_image(), make_face(bbox=GOOD_BBOX, yaw_offset=offset))
         assert ReasonCode.EXTREME_POSE in report.issues
+
+    @pytest.mark.parametrize("offset", [0.2, -0.2, 0.3])
+    def test_moderately_turned_head_is_tolerated(self, offset: float) -> None:
+        """Deliberate: SFace handles far more yaw than the first guess assumed.
+
+        At the original 0.55 threshold, 2 of 11 verified-good official
+        portraits were rejected as EXTREME_POSE despite producing correct
+        identity decisions. Rejecting a usable photo costs more than embedding
+        a slightly angled one.
+        """
+        report = assess_quality(good_image(), make_face(bbox=GOOD_BBOX, yaw_offset=offset))
+        assert ReasonCode.EXTREME_POSE not in report.issues
 
     def test_nose_outside_the_eyes_trips_extreme_pose(self) -> None:
         # Beyond the eye line the distance goes negative; the ratio must fail
