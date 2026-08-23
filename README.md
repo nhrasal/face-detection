@@ -18,16 +18,48 @@ weights and real portraits. 92% coverage, mypy strict and ruff clean.
 Not yet wired to HTTP or a database; `analyse()` and `decide_comparison()` are
 callable but nothing exposes them.
 
-| Phase | | |
-|---|---|---|
-| 1 | Scaffold, config, logging, health | done |
-| 2 | Model download + checksum verification | done |
-| 3 | Decode, alignment, quality metrics | done |
-| 4 | YuNet + SFace adapter — **proves the core hypothesis** | done |
-| 5 | Pipeline orchestration + decision layer | done |
-| 6–11 | DB, HTTP, users, security, frontend, Docker | next |
-| 12 | **Threshold calibration** — V1 is not done until this runs | |
-| 13–15 | InsightFace benchmark (optional), docs | |
+| Phase | | Area | |
+|---|---|---|---|
+| 1 | Scaffold, config, logging, health | backend | done |
+| 2 | Model download + checksum verification | backend | done |
+| 3 | Decode, alignment, quality metrics | backend | done |
+| 4 | YuNet + SFace adapter — **proves the core hypothesis** | backend | done |
+| 5 | Pipeline orchestration + decision layer | backend | done |
+| 6 | Postgres schema, SQLAlchemy models, Alembic, repositories | backend | next |
+| 7 | HTTP layer — detect/compare, errors, rate limiting, warmup | backend | |
+| 8 | Users, reference resolver, profile upload, verify + history | backend | |
+| 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | |
+| 10 | React upload/verify UI with per-reason messaging | frontend | |
+| 11 | Docker Compose — runs from a clean clone | ops | |
+| 12 | **Threshold calibration** — V1 is not shippable until this runs | data | |
+| 13 | InsightFace benchmark — optional, see open decisions | backend | |
+| 14–15 | Retention/architecture docs, `.env` finalisation | docs | |
+
+**Five phases (6–10) to a working system; seven (through 12) to a shippable one.**
+
+Phase 7 is the heaviest; 6 and 10 are moderate; 8 and 9 are small. Backend is roughly
+4x the frontend, because the frontend is deliberately dependency-light — six runtime
+packages, no `@gems/components`, no router, no form library.
+
+### The one thing effort cannot unblock
+
+**Phase 12 needs data, not code.** The match threshold, `min_sharpness`, and the pose
+and detection-score gates are all still provisional. Eleven astronaut portraits proved
+the pipeline works; they cannot set an operating point. That needs a labelled set —
+LFW works as a sanity check, but internal GEMS employee photos would be far more
+representative of the real population and carry their own approval process.
+
+Worth starting that conversation in parallel with phases 6–10, not at phase 12.
+
+### Open decisions
+
+1. **Confirm the threshold correction.** The roadmap's `0.72` is replaced by SFace's
+   documented `0.363` as a *starting* value. Changing this affects `ModelInfo`, the API
+   contract, and the frontend's result display.
+2. **Is the InsightFace adapter in scope at all?** Dropping it removes phase 13 and the
+   entire non-commercial licensing question. Keeping it should be sequenced *after*
+   calibration, so two calibrated engines are compared rather than one calibrated and
+   one guessed.
 
 ## Quickstart
 
