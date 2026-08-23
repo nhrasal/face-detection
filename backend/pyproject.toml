@@ -1,0 +1,34 @@
+[project]
+name = "face-verification"
+version = "0.1.0"
+description = "Face verification service — V1: photo-to-photo comparison against a stored profile image."
+requires-python = ">=3.13"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# The default run is hermetic: no ONNX weights, no face assets, no network.
+# Drop `-m "not models"` to run the tiers that need real models.
+addopts = "-m 'not models' -q"
+markers = [
+    "models: requires real ONNX weights in models/ plus face assets in tests/assets/",
+    "slow: takes more than a second",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+# cv2 and onnxruntime ship incomplete stubs; don't let that block strict mode
+# on our own code.
+[[tool.mypy.overrides]]
+module = ["cv2.*", "onnxruntime.*", "filetype.*", "slowapi.*"]
+ignore_missing_imports = true
