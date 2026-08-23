@@ -9,19 +9,19 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
 ## Status
 
-**Phases 1–3 of 15 complete** — backend skeleton, model fetching with checksum
-verification, and the engine's pure layer: safe decoding, five-point alignment, and
-quality assessment. 83 hermetic unit tests, no models or face assets required.
+**Phases 1–4 of 15 complete.** The core hypothesis is proven: this pipeline
+recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-No model adapter yet, so nothing detects or embeds a real face until phase 4.
+98 hermetic tests (no models or assets needed) plus 27 model-tier tests against real
+weights and real portraits. mypy strict and ruff clean.
 
 | Phase | | |
 |---|---|---|
 | 1 | Scaffold, config, logging, health | done |
 | 2 | Model download + checksum verification | done |
 | 3 | Decode, alignment, quality metrics | done |
-| 4 | YuNet + SFace adapter — **proves the core hypothesis** | next |
-| 5–11 | Pipeline, DB, HTTP, users, security, frontend, Docker | |
+| 4 | YuNet + SFace adapter — **proves the core hypothesis** | done |
+| 5–11 | Pipeline, DB, HTTP, users, security, frontend, Docker | next |
 | 12 | **Threshold calibration** — V1 is not done until this runs | |
 | 13–15 | InsightFace benchmark (optional), docs | |
 
@@ -97,6 +97,28 @@ Measured directly against OpenCV 5.0 on this stack, not assumed:
 - Cold cost on this machine: ~50 ms to load each model, ~10 ms `detect()` on
   640×480, ~12 ms `feature()`. Unwarmed — first real inference is much slower, which
   is why the engine pool warms at startup.
+
+## Does it work?
+
+Yes — measured on 11 public-domain NASA portraits across 5 identities, using the
+default YuNet + SFace engine at its documented 0.363 cosine threshold.
+
+| | n | min | mean | max |
+|---|---:|---:|---:|---:|
+| genuine (same person) | 7 | **+0.4679** | +0.6812 | +0.8428 |
+| impostor (different people) | 48 | −0.0030 | +0.1355 | **+0.3285** |
+
+The two distributions do not overlap. Worst genuine (+0.4679) sits clearly above best
+impostor (+0.3285), a **separation gap of +0.139**, and the threshold falls inside
+that gap. This is the assertion the test suite makes, and it is stronger than testing
+the threshold alone: if the distributions ever overlap, no threshold can separate them
+and the fault is upstream — alignment, landmark order, or quality gating.
+
+**The margin is thinner on the impostor side.** The best impostor pair is only 0.035
+below the threshold, versus 0.105 of headroom on the genuine side. On this tiny sample
+that already suggests the operating point wants to move up, and it is exactly why
+phase 12 picks the threshold from a false-accept budget rather than from a document.
+Eleven photos of five astronauts is a smoke test, not a calibration set.
 
 ## Two things that will bite
 
