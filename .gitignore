@@ -3,13 +3,18 @@
 # is effectively permanent and un-erasable. This block exists from the first
 # commit deliberately; it is the only cheap moment to get it right.
 backend/calibration/data/
-backend/tests/assets/
+backend/tests/assets/*
 !backend/tests/assets/.gitkeep
 
 # --- model weights (fetched by scripts/download_models.sh) -------------------
-# Not committed: ~200MB, and the opt-in buffalo_l weights are
-# non-commercial-research licensed and must not live in a distributable artifact.
-models/
+# Not committed: ~40MB for the default pair, and the opt-in buffalo_l weights
+# are non-commercial-research licensed and must not live in a distributable
+# artifact.
+#
+# Note `models/*` and not `models/` — git cannot re-include a file whose parent
+# directory is excluded, so a bare `models/` would make the .gitkeep negation
+# below silently dead.
+models/*
 !models/.gitkeep
 
 # --- python ------------------------------------------------------------------
