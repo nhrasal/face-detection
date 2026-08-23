@@ -1,0 +1,40 @@
+# Face Verification service — runtime dependencies.
+#
+# All pins are the latest stable release as of 2026-08-23, resolved and
+# verified together on Python 3.13.5 / macOS arm64 (`pip check` clean).
+# Every one of these ships a native macosx_11_0_arm64 AND manylinux aarch64
+# wheel, so there are no source builds and no Rosetta on Apple Silicon.
+#
+# NOTE ON NUMPY: the whole stack is built against NumPy 2.x. Do not pin numpy
+# back below 2.0 — mixing a NumPy-1-built extension with a NumPy-2 runtime is
+# what produces "module compiled against API version 0x10" crashes. Keep cv2,
+# onnxruntime and numpy moving together or not at all.
+
+# --- web layer -------------------------------------------------------------
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32          # multipart/form-data image uploads
+pydantic==2.13.4
+pydantic-settings==2.15.0
+
+# --- persistence -----------------------------------------------------------
+SQLAlchemy==2.0.52
+alembic==1.19.1
+psycopg[binary]==3.3.4            # psycopg3 does sync AND async: one
+                                  # postgresql+psycopg:// URL for app + alembic
+
+# --- vision / inference ----------------------------------------------------
+numpy==2.5.2
+opencv-python-headless==5.0.0.93  # headless: no GTK/Qt. Verified to still
+                                  # expose FaceDetectorYN, FaceRecognizerSF
+                                  # (alignCrop/feature/match), FR_COSINE and
+                                  # estimateAffinePartial2D in the 5.x line.
+onnxruntime==1.29.0               # opt-in InsightFace adapter only
+pillow==12.3.0                    # decode, EXIF transpose, bomb guard
+
+# --- hardening / ops -------------------------------------------------------
+filetype==1.2.0                   # magic-byte sniffing; no libmagic needed
+slowapi==0.1.10                   # rate limiting, redis or in-memory storage
+redis==8.1.0
+structlog==26.1.0
+orjson==3.12.0

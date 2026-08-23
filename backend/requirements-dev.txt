@@ -1,0 +1,15 @@
+-r requirements.txt
+
+# Test + lint toolchain. Latest stable as of 2026-08-23.
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+httpx==0.28.1                # ASGITransport for API contract tests
+ruff==0.16.4
+mypy==2.3.1
+
+# Calibration only (phase 12): FAR/FRR/EER sweep and plots.
+scikit-learn==1.9.0
+pandas==3.0.5
+matplotlib==3.11.1
+pyarrow==25.0.1
