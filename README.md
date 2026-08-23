@@ -9,11 +9,14 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
 ## Status
 
-**Phases 1–4 of 15 complete.** The core hypothesis is proven: this pipeline
+**Phases 1–5 of 15 complete.** The core hypothesis is proven: this pipeline
 recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-98 hermetic tests (no models or assets needed) plus 27 model-tier tests against real
-weights and real portraits. mypy strict and ruff clean.
+210 tests — 169 hermetic (no models or assets needed) plus 41 model-tier against real
+weights and real portraits. 92% coverage, mypy strict and ruff clean.
+
+Not yet wired to HTTP or a database; `analyse()` and `decide_comparison()` are
+callable but nothing exposes them.
 
 | Phase | | |
 |---|---|---|
@@ -21,7 +24,8 @@ weights and real portraits. mypy strict and ruff clean.
 | 2 | Model download + checksum verification | done |
 | 3 | Decode, alignment, quality metrics | done |
 | 4 | YuNet + SFace adapter — **proves the core hypothesis** | done |
-| 5–11 | Pipeline, DB, HTTP, users, security, frontend, Docker | next |
+| 5 | Pipeline orchestration + decision layer | done |
+| 6–11 | DB, HTTP, users, security, frontend, Docker | next |
 | 12 | **Threshold calibration** — V1 is not done until this runs | |
 | 13–15 | InsightFace benchmark (optional), docs | |
 
@@ -119,6 +123,22 @@ below the threshold, versus 0.105 of headroom on the genuine side. On this tiny 
 that already suggests the operating point wants to move up, and it is exactly why
 phase 12 picks the threshold from a false-accept budget rather than from a document.
 Eleven photos of five astronauts is a smoke test, not a calibration set.
+
+## Quality gating is the recall risk
+
+Thresholds in `QualityThresholds` are **provisional and deliberately permissive**.
+Measured against the 11 verified-good portraits in the test set, the original guesses
+excluded **27%** of them — every one of which still produced a *correct* identity
+decision. `min_yaw_symmetry` went 0.55 → 0.15 and `min_detection_score` 0.90 → 0.75
+on that evidence; `min_sharpness` ships effectively off.
+
+This failure mode is expensive because it misdiagnoses: tighten a gate, watch
+would-be matches become `LOW_QUALITY` rejections, and conclude the model is bad. It
+presents as a recognition problem and is a gating problem. A model-tier test asserts
+the exclusion rate stays at zero on known-good portraits, and phase 12's calibration
+sets the real values.
+
+**Rejecting a usable photo costs more than embedding a slightly angled one.**
 
 ## Two things that will bite
 
