@@ -9,15 +9,18 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
 ## Status
 
-**Phase 1 of 15 complete** — backend skeleton, settings, structured logging, health
-endpoints. No face pipeline yet.
+**Phases 1–3 of 15 complete** — backend skeleton, model fetching with checksum
+verification, and the engine's pure layer: safe decoding, five-point alignment, and
+quality assessment. 83 hermetic unit tests, no models or face assets required.
+
+No model adapter yet, so nothing detects or embeds a real face until phase 4.
 
 | Phase | | |
 |---|---|---|
 | 1 | Scaffold, config, logging, health | done |
 | 2 | Model download + checksum verification | done |
-| 3 | Decode, alignment, quality metrics | next |
-| 4 | YuNet + SFace adapter — **proves the core hypothesis** | |
+| 3 | Decode, alignment, quality metrics | done |
+| 4 | YuNet + SFace adapter — **proves the core hypothesis** | next |
 | 5–11 | Pipeline, DB, HTTP, users, security, frontend, Docker | |
 | 12 | **Threshold calibration** — V1 is not done until this runs | |
 | 13–15 | InsightFace benchmark (optional), docs | |
