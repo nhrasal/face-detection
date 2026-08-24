@@ -9,10 +9,10 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
 ## Status
 
-**Phases 1–8 of 15 complete.** The core hypothesis is proven: this pipeline
+**Phases 1–9 of 15 complete.** The core hypothesis is proven: this pipeline
 recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-229 tests — 189 hermetic (no models or assets needed) plus 40 model-tier against real
+237 tests — 197 hermetic (no models or assets needed) plus 40 model-tier against real
 weights and real portraits. 92% coverage, mypy strict and ruff clean.
 
 Photo-to-photo detection and comparison plus user/profile verification are exposed over
@@ -29,14 +29,14 @@ re-encoded under generated storage keys.
 | 6 | Postgres schema, SQLAlchemy models, Alembic, repositories | backend | done |
 | 7 | HTTP layer — detect/compare, errors, rate limiting, warmup | backend | done |
 | 8 | Users, reference resolver, profile upload, verify + history | backend | done |
-| 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | next |
-| 10 | React upload/verify UI with per-reason messaging | frontend | |
+| 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | done |
+| 10 | React upload/verify UI with per-reason messaging | frontend | next |
 | 11 | Docker Compose — runs from a clean clone | ops | |
 | 12 | **Threshold calibration** — V1 is not shippable until this runs | data | |
 | 13 | InsightFace benchmark — optional, see open decisions | backend | |
 | 14–15 | Retention/architecture docs, `.env` finalisation | docs | |
 
-**Two phases (9–10) to a working system; four (through 12) to a shippable one.**
+**One phase (10) to a working system; three (through 12) to a shippable one.**
 
 Phase 7 is the heaviest; 6 and 10 are moderate; 8 and 9 are small. Backend is roughly
 4x the frontend, because the frontend is deliberately dependency-light — six runtime
@@ -112,6 +112,19 @@ under generated UUID-based keys. Original filenames and original bytes are not r
 Replacing a profile removes the superseded local file only after the database update
 commits. Phase 8 uses local storage behind `ProfileImageStore`; a later deployment can
 replace that boundary with S3/MinIO.
+
+### HTTP security boundary
+
+- `MAX_REQUEST_BYTES` rejects oversized requests before multipart parsing or disk spooling,
+  including streamed bodies that omit `Content-Length`.
+- Each image is independently bounded by bytes, decoded pixels, and longest edge.
+- File acceptance uses magic bytes; filenames and client-declared MIME types are ignored.
+- GIF, SVG, malformed files, decompression bombs, and unsupported formats are rejected.
+- Stored profile keys are containment-checked before reads and deletes.
+- Candidate images are never written to storage.
+- API and database shape tests prohibit embeddings, vectors, and biometric templates.
+- Every response uses `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`.
 
 Checks:
 

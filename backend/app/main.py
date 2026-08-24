@@ -16,6 +16,7 @@ from app.api.v1.face import create_face_router, limiter
 from app.api.v1.users import create_users_router
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.core.http_security import RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.logging import configure_logging, get_logger
 from app.db.session import create_database_engine, create_session_factory
 from app.engine.factory import build_engine
@@ -95,6 +96,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestSizeLimitMiddleware, max_bytes=settings.MAX_REQUEST_BYTES)
+    app.add_middleware(SecurityHeadersMiddleware)
 
     @app.get("/healthz", tags=["health"])
     async def healthz() -> dict[str, Any]:

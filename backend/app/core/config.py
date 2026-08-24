@@ -54,6 +54,9 @@ class Settings(BaseSettings):
 
     # --- upload limits -----------------------------------------------------
     MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
+    # Covers two maximum-sized images plus multipart framing. Enforced before
+    # Starlette parses/spools multipart data.
+    MAX_REQUEST_BYTES: int = 11 * 1024 * 1024
     MAX_IMAGE_PIXELS: int = 40_000_000
     MAX_IMAGE_SIDE: int = 8000
     ALLOWED_MIME: set[str] = {"image/jpeg", "image/png", "image/webp"}
