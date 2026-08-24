@@ -13,11 +13,14 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.face import create_face_router, limiter
+from app.api.v1.users import create_users_router
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger
+from app.db.session import create_database_engine, create_session_factory
 from app.engine.factory import build_engine
 from app.engine.pool import EnginePool
+from app.services.profile_storage import ProfileImageStore
 
 log = get_logger(__name__)
 
@@ -29,11 +32,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pool = EnginePool(lambda: build_engine(settings), size=settings.INFERENCE_WORKERS)
+        database_engine = create_database_engine(settings.DATABASE_URL)
         app.state.engine_pool = pool
+        app.state.database_engine = database_engine
+        app.state.session_factory = create_session_factory(database_engine)
+        app.state.profile_store = ProfileImageStore(settings.UPLOAD_DIR, settings)
         try:
             yield
         finally:
             pool.close()
+            database_engine.dispose()
 
     app = FastAPI(
         title="Face Verification Service",
@@ -109,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     app.include_router(create_face_router(settings, limiter), prefix=settings.API_PREFIX)
+    app.include_router(create_users_router(settings, limiter), prefix=settings.API_PREFIX)
 
     log.info("app.created", env=settings.ENV, engine=settings.FACE_ENGINE)
     return app

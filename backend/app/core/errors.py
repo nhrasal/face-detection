@@ -56,3 +56,13 @@ class EngineBusyError(AppError):
 
     code = "ENGINE_BUSY"
     http_status = 503
+
+
+class ResourceNotFoundError(AppError):
+    code = "NOT_FOUND"
+    http_status = 404
+
+
+class ConflictError(AppError):
+    code = "CONFLICT"
+    http_status = 409

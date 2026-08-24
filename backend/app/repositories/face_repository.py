@@ -23,9 +23,26 @@ class UserRepository:
     def get_by_external_id(self, external_id: str) -> User | None:
         return self.session.scalar(select(User).where(User.external_id == external_id))
 
-    def create(self, *, external_id: str, name: str, profile_image_url: str) -> User:
-        user = User(external_id=external_id, name=name, profile_image_url=profile_image_url)
+    def create(
+        self,
+        *,
+        external_id: str,
+        name: str,
+        profile_image_url: str,
+        user_id: uuid.UUID | None = None,
+    ) -> User:
+        user = User(
+            id=user_id or uuid.uuid4(),
+            external_id=external_id,
+            name=name,
+            profile_image_url=profile_image_url,
+        )
         self.session.add(user)
+        self.session.flush()
+        return user
+
+    def update_profile_image(self, user: User, profile_image_url: str) -> User:
+        user.profile_image_url = profile_image_url
         self.session.flush()
         return user
 
@@ -37,12 +54,15 @@ class FaceVerificationRepository:
     def get(self, verification_id: uuid.UUID) -> FaceVerification | None:
         return self.session.get(FaceVerification, verification_id)
 
-    def list_for_user(self, user_id: uuid.UUID, *, limit: int = 50) -> list[FaceVerification]:
+    def list_for_user(
+        self, user_id: uuid.UUID, *, limit: int = 50, offset: int = 0
+    ) -> list[FaceVerification]:
         statement = (
             select(FaceVerification)
             .where(FaceVerification.user_id == user_id)
             .order_by(FaceVerification.created_at.desc())
             .limit(limit)
+            .offset(offset)
         )
         return list(self.session.scalars(statement))
 

@@ -9,14 +9,15 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
 ## Status
 
-**Phases 1–7 of 15 complete.** The core hypothesis is proven: this pipeline
+**Phases 1–8 of 15 complete.** The core hypothesis is proven: this pipeline
 recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-223 tests — 183 hermetic (no models or assets needed) plus 40 model-tier against real
+229 tests — 189 hermetic (no models or assets needed) plus 40 model-tier against real
 weights and real portraits. 92% coverage, mypy strict and ruff clean.
 
-Photo-to-photo detection and comparison are exposed over HTTP. Persistence exists but is
-not connected to user profile resolution or verification history; that is Phase 8.
+Photo-to-photo detection and comparison plus user/profile verification are exposed over
+HTTP. Every user verification writes an audit row; profile images are stripped and
+re-encoded under generated storage keys.
 
 | Phase | | Area | |
 |---|---|---|---|
@@ -27,15 +28,15 @@ not connected to user profile resolution or verification history; that is Phase 
 | 5 | Pipeline orchestration + decision layer | backend | done |
 | 6 | Postgres schema, SQLAlchemy models, Alembic, repositories | backend | done |
 | 7 | HTTP layer — detect/compare, errors, rate limiting, warmup | backend | done |
-| 8 | Users, reference resolver, profile upload, verify + history | backend | next |
-| 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | |
+| 8 | Users, reference resolver, profile upload, verify + history | backend | done |
+| 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | next |
 | 10 | React upload/verify UI with per-reason messaging | frontend | |
 | 11 | Docker Compose — runs from a clean clone | ops | |
 | 12 | **Threshold calibration** — V1 is not shippable until this runs | data | |
 | 13 | InsightFace benchmark — optional, see open decisions | backend | |
 | 14–15 | Retention/architecture docs, `.env` finalisation | docs | |
 
-**Three phases (8–10) to a working system; five (through 12) to a shippable one.**
+**Two phases (9–10) to a working system; four (through 12) to a shippable one.**
 
 Phase 7 is the heaviest; 6 and 10 are moderate; 8 and 9 are small. Backend is roughly
 4x the frontend, because the frontend is deliberately dependency-light — six runtime
@@ -86,6 +87,18 @@ curl \
   -F reference_image=@reference.jpg \
   -F candidate_image=@candidate.jpg \
   localhost:8000/api/v1/face/compare
+
+curl \
+  -F external_id=employee-123 \
+  -F name='Example User' \
+  -F profile_image=@profile.jpg \
+  localhost:8000/api/v1/users
+
+curl \
+  -F candidate_image=@candidate.jpg \
+  localhost:8000/api/v1/users/USER_UUID/verify
+
+curl localhost:8000/api/v1/users/USER_UUID/verifications
 ```
 
 Uploads are identified from magic bytes rather than filenames or declared MIME types,
@@ -93,6 +106,12 @@ bounded before decoding, and processed in a fixed warmed engine pool. Responses 
 face status, quality reasons, score, threshold, model versions, and processing time but
 never embeddings. `NO_FACE`, `MULTIPLE_FACES`, and `LOW_QUALITY` are successful HTTP 200
 decisions; malformed/oversized uploads and infrastructure failures use normalized errors.
+
+User profile uploads are decoded, stripped of metadata, re-encoded as JPEG, and written
+under generated UUID-based keys. Original filenames and original bytes are not retained.
+Replacing a profile removes the superseded local file only after the database update
+commits. Phase 8 uses local storage behind `ProfileImageStore`; a later deployment can
+replace that boundary with S3/MinIO.
 
 Checks:
 
