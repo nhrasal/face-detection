@@ -25,9 +25,9 @@ def _build_insightface(settings: Settings) -> FaceEngine:
 
 
 def _build_fake(settings: Settings) -> FaceEngine:
-    # Arrives with the HTTP layer, where it makes the API tests hermetic. The
-    # ENV=prod refusal in Settings already guards it.
-    raise AppError("The fake engine is not implemented yet.")
+    from app.engine.adapters.fake import FakeEngine
+
+    return FakeEngine()
 
 
 _REGISTRY: dict[str, Callable[[Settings], FaceEngine]] = {

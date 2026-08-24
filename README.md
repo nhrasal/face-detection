@@ -9,14 +9,14 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
 ## Status
 
-**Phases 1–5 of 15 complete.** The core hypothesis is proven: this pipeline
+**Phases 1–7 of 15 complete.** The core hypothesis is proven: this pipeline
 recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-210 tests — 169 hermetic (no models or assets needed) plus 41 model-tier against real
+223 tests — 183 hermetic (no models or assets needed) plus 40 model-tier against real
 weights and real portraits. 92% coverage, mypy strict and ruff clean.
 
-Not yet wired to HTTP or a database; `analyse()` and `decide_comparison()` are
-callable but nothing exposes them.
+Photo-to-photo detection and comparison are exposed over HTTP. Persistence exists but is
+not connected to user profile resolution or verification history; that is Phase 8.
 
 | Phase | | Area | |
 |---|---|---|---|
@@ -25,9 +25,9 @@ callable but nothing exposes them.
 | 3 | Decode, alignment, quality metrics | backend | done |
 | 4 | YuNet + SFace adapter — **proves the core hypothesis** | backend | done |
 | 5 | Pipeline orchestration + decision layer | backend | done |
-| 6 | Postgres schema, SQLAlchemy models, Alembic, repositories | backend | next |
-| 7 | HTTP layer — detect/compare, errors, rate limiting, warmup | backend | |
-| 8 | Users, reference resolver, profile upload, verify + history | backend | |
+| 6 | Postgres schema, SQLAlchemy models, Alembic, repositories | backend | done |
+| 7 | HTTP layer — detect/compare, errors, rate limiting, warmup | backend | done |
+| 8 | Users, reference resolver, profile upload, verify + history | backend | next |
 | 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | |
 | 10 | React upload/verify UI with per-reason messaging | frontend | |
 | 11 | Docker Compose — runs from a clean clone | ops | |
@@ -35,7 +35,7 @@ callable but nothing exposes them.
 | 13 | InsightFace benchmark — optional, see open decisions | backend | |
 | 14–15 | Retention/architecture docs, `.env` finalisation | docs | |
 
-**Five phases (6–10) to a working system; seven (through 12) to a shippable one.**
+**Three phases (8–10) to a working system; five (through 12) to a shippable one.**
 
 Phase 7 is the heaviest; 6 and 10 are moderate; 8 and 9 are small. Backend is roughly
 4x the frontend, because the frontend is deliberately dependency-light — six runtime
@@ -73,9 +73,26 @@ cp ../.env.example .env
 
 ```bash
 curl localhost:8000/healthz   # {"status":"ok"}
-curl localhost:8000/readyz    # {"status":"ready","engine":"opencv_zoo","warm":false}
+curl localhost:8000/readyz    # {"status":"ready","engine":"opencv_zoo","warm":true}
 open  localhost:8000/docs
 ```
+
+HTTP endpoints:
+
+```bash
+curl -F image=@portrait.jpg localhost:8000/api/v1/face/detect
+
+curl \
+  -F reference_image=@reference.jpg \
+  -F candidate_image=@candidate.jpg \
+  localhost:8000/api/v1/face/compare
+```
+
+Uploads are identified from magic bytes rather than filenames or declared MIME types,
+bounded before decoding, and processed in a fixed warmed engine pool. Responses expose
+face status, quality reasons, score, threshold, model versions, and processing time but
+never embeddings. `NO_FACE`, `MULTIPLE_FACES`, and `LOW_QUALITY` are successful HTTP 200
+decisions; malformed/oversized uploads and infrastructure failures use normalized errors.
 
 Checks:
 

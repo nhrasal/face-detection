@@ -1,18 +1,23 @@
-"""FastAPI application factory.
-
-Phase 1 scope: health only. The engine pool, database session, error handlers,
-rate limiting and the v1 routers arrive in later phases — see the build plan.
-"""
+"""FastAPI application factory and inference-engine lifecycle."""
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any, cast
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
+from app.api.v1.face import create_face_router, limiter
 from app.core.config import Settings, get_settings
+from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger
+from app.engine.factory import build_engine
+from app.engine.pool import EnginePool
 
 log = get_logger(__name__)
 
@@ -21,13 +26,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(level=settings.LOG_LEVEL, json_output=settings.LOG_JSON)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        pool = EnginePool(lambda: build_engine(settings), size=settings.INFERENCE_WORKERS)
+        app.state.engine_pool = pool
+        try:
+            yield
+        finally:
+            pool.close()
+
     app = FastAPI(
         title="Face Verification Service",
         version="0.1.0",
         description="V1: compare an uploaded photo against a stored profile image.",
         docs_url="/docs",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
+    app.state.settings = settings
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))
+
+    @app.exception_handler(AppError)
+    async def app_error_handler(request: Request, error: AppError) -> JSONResponse:
+        headers = {"Retry-After": "1"} if error.http_status == 503 else None
+        return JSONResponse(
+            status_code=error.http_status,
+            headers=headers,
+            content={
+                "success": False,
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "detail": error.detail,
+                },
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error_handler(request: Request, error: Exception) -> JSONResponse:
+        # Never include exception text: decoder/model failures can contain paths
+        # and implementation details. The traceback stays in server logs.
+        log.exception("request.failed", path=request.url.path, error_type=type(error).__name__)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": {
+                    "code": "PROCESSING_ERROR",
+                    "message": "The image could not be processed.",
+                    "detail": None,
+                },
+            },
+        )
 
     app.add_middleware(
         CORSMiddleware,
@@ -50,7 +101,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         until the models are loaded and warmed. Today there is nothing to warm,
         so it mirrors liveness.
         """
-        return {"status": "ready", "engine": settings.FACE_ENGINE, "warm": False}
+        pool = getattr(app.state, "engine_pool", None)
+        return {
+            "status": "ready" if pool is not None else "starting",
+            "engine": settings.FACE_ENGINE,
+            "warm": pool is not None,
+        }
+
+    app.include_router(create_face_router(settings, limiter), prefix=settings.API_PREFIX)
 
     log.info("app.created", env=settings.ENV, engine=settings.FACE_ENGINE)
     return app

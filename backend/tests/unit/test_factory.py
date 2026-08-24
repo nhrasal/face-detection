@@ -31,11 +31,15 @@ class TestRegistry:
 
 
 class TestNotYetImplemented:
-    @pytest.mark.parametrize("name", ["insightface", "fake"])
+    @pytest.mark.parametrize("name", ["insightface"])
     def test_unbuilt_engines_raise_rather_than_returning_something_broken(self, name: str) -> None:
         settings = settings_for(name, ALLOW_NONCOMMERCIAL_MODELS=True)
         with pytest.raises(AppError, match="not implemented yet"):
             build_engine(settings)
+
+    def test_fake_engine_is_available_for_hermetic_http_tests(self) -> None:
+        engine = build_engine(settings_for("fake"))
+        assert engine.info.detector_name == "fake"
 
 
 class TestMissingWeights:
