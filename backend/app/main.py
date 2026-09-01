@@ -13,6 +13,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.face import create_face_router, limiter
+from app.api.v1.stream import create_stream_router
 from app.api.v1.users import create_users_router
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
@@ -121,6 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(create_face_router(settings, limiter), prefix=settings.API_PREFIX)
     app.include_router(create_users_router(settings, limiter), prefix=settings.API_PREFIX)
+    app.include_router(create_stream_router(settings), prefix=settings.API_PREFIX)
 
     log.info("app.created", env=settings.ENV, engine=settings.FACE_ENGINE)
     return app
