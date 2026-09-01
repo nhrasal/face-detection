@@ -13,12 +13,13 @@ from app.api.dependencies import get_db
 from app.api.schemas import (
     CompareResponse,
     UserResponse,
+    UserSearchResponse,
     VerificationHistoryItem,
     VerificationHistoryResponse,
 )
 from app.api.v1.face import _analyse_bytes
 from app.core.config import Settings
-from app.core.errors import ConflictError, ResourceNotFoundError
+from app.core.errors import ConflictError, InvalidRequestError, ResourceNotFoundError
 from app.engine.pool import EnginePool
 from app.models.user import User
 from app.repositories.face_repository import FaceVerificationRepository, UserRepository
@@ -26,6 +27,8 @@ from app.services.decision import Decision, decide_comparison
 from app.services.profile_storage import ProfileImageStore
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+MIN_SEARCH_LENGTH = 2
 
 
 def _read_upload_sync(upload: UploadFile, max_bytes: int) -> bytes:
@@ -77,6 +80,31 @@ def create_users_router(settings: Settings, limiter: Limiter) -> APIRouter:
         except Exception:
             store.delete(key)
             raise
+
+    @router.get("", response_model=UserSearchResponse)
+    def search_users(
+        session: DbSession,
+        search: Annotated[str, Query(min_length=MIN_SEARCH_LENGTH, max_length=255)],
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    ) -> UserSearchResponse:
+        """Find users by external ID or name.
+
+        `search` is required and has a minimum length so the endpoint cannot be used
+        to page through the whole user table. The length is re-checked after
+        stripping, or `"  a  "` would slip a one-character search past the guard.
+        """
+        query = search.strip()
+        if len(query) < MIN_SEARCH_LENGTH:
+            raise InvalidRequestError(
+                f"Search needs at least {MIN_SEARCH_LENGTH} characters.",
+                detail="SEARCH_TOO_SHORT",
+            )
+        rows = UserRepository(session).search(query, limit=limit)
+        return UserSearchResponse(
+            query=query,
+            limit=limit,
+            items=[UserResponse.model_validate(row) for row in rows],
+        )
 
     @router.get("/{user_id}", response_model=UserResponse)
     def get_user(user_id: uuid.UUID, session: DbSession) -> User:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.types import ModelInfo
@@ -22,6 +22,27 @@ class UserRepository:
 
     def get_by_external_id(self, external_id: str) -> User | None:
         return self.session.scalar(select(User).where(User.external_id == external_id))
+
+    def search(self, query: str, *, limit: int = 20) -> list[User]:
+        """Substring match over external_id and name, newest-registered first.
+
+        LIKE wildcards in the query are escaped so a user typing "%" searches for a
+        literal percent sign rather than matching every row.
+        """
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        statement = (
+            select(User)
+            .where(
+                or_(
+                    User.external_id.ilike(pattern, escape="\\"),
+                    User.name.ilike(pattern, escape="\\"),
+                )
+            )
+            .order_by(User.created_at.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
 
     def create(
         self,

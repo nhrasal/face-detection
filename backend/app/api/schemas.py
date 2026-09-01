@@ -84,6 +84,12 @@ class VerificationHistoryItem(BaseModel):
     created_at: datetime
 
 
+class UserSearchResponse(BaseModel):
+    query: str
+    items: list[UserResponse]
+    limit: int
+
+
 class VerificationHistoryResponse(BaseModel):
     user_id: uuid.UUID
     items: list[VerificationHistoryItem]

@@ -69,6 +69,39 @@ def test_create_and_get_user_reencodes_profile_under_generated_name(
     assert profile.content.startswith(b"\xff\xd8\xff")
 
 
+def test_search_matches_external_id_and_name_and_refuses_to_list_everything(
+    phase8_client: tuple[TestClient, Path],
+) -> None:
+    client, _ = phase8_client
+    for seed, (external_id, name) in enumerate(
+        [("emp-001", "Ada Lovelace"), ("emp-002", "Grace Hopper")], start=1
+    ):
+        created = client.post(
+            "/api/v1/users",
+            data={"external_id": external_id, "name": name},
+            files={"profile_image": image(seed)},
+        )
+        assert created.status_code == 201
+
+    by_name = client.get("/api/v1/users", params={"search": "grace"})
+    assert by_name.status_code == 200
+    assert [item["external_id"] for item in by_name.json()["items"]] == ["emp-002"]
+
+    by_external_id = client.get("/api/v1/users", params={"search": "emp-001"})
+    assert [item["name"] for item in by_external_id.json()["items"]] == ["Ada Lovelace"]
+
+    # A bare wildcard must be matched literally, not expanded into "everything".
+    wildcard = client.get("/api/v1/users", params={"search": "%%"})
+    assert wildcard.json()["items"] == []
+
+    # No query, or one too short to be a real search, is rejected rather than
+    # returning the whole table. Padding a short query with spaces does not get
+    # it past the guard either.
+    assert client.get("/api/v1/users").status_code == 422
+    assert client.get("/api/v1/users", params={"search": "a"}).status_code == 422
+    assert client.get("/api/v1/users", params={"search": "  a  "}).status_code == 422
+
+
 def test_duplicate_external_id_is_a_conflict_and_leaves_one_file(
     phase8_client: tuple[TestClient, Path],
 ) -> None:

@@ -66,3 +66,10 @@ class ResourceNotFoundError(AppError):
 class ConflictError(AppError):
     code = "CONFLICT"
     http_status = 409
+
+
+class InvalidRequestError(AppError):
+    """A parameter arrived well-formed but is not usable as given."""
+
+    code = "INVALID_REQUEST"
+    http_status = 422
