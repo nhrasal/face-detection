@@ -9,11 +9,13 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
 ## Status
 
-**Phases 1–9 of 15 complete.** The core hypothesis is proven: this pipeline
+**Phases 1–10 of 15 complete.** The first working end-to-end system is now complete,
+and the core hypothesis is proven: this pipeline
 recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-237 tests — 197 hermetic (no models or assets needed) plus 40 model-tier against real
-weights and real portraits. 92% coverage, mypy strict and ruff clean.
+243 tests — 197 backend hermetic (no models or assets needed), 40 model-tier against
+real weights and portraits, and 6 frontend tests. Backend mypy strict and ruff clean;
+frontend TypeScript, ESLint, Vitest, and production build clean.
 
 Photo-to-photo detection and comparison plus user/profile verification are exposed over
 HTTP. Every user verification writes an audit row; profile images are stripped and
@@ -30,17 +32,18 @@ re-encoded under generated storage keys.
 | 7 | HTTP layer — detect/compare, errors, rate limiting, warmup | backend | done |
 | 8 | Users, reference resolver, profile upload, verify + history | backend | done |
 | 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | done |
-| 10 | React upload/verify UI with per-reason messaging | frontend | next |
-| 11 | Docker Compose — runs from a clean clone | ops | |
+| 10 | React upload/verify UI with per-reason messaging | frontend | done |
+| 11 | Docker Compose — runs from a clean clone | ops | next |
 | 12 | **Threshold calibration** — V1 is not shippable until this runs | data | |
 | 13 | InsightFace benchmark — optional, see open decisions | backend | |
 | 14–15 | Retention/architecture docs, `.env` finalisation | docs | |
 
-**One phase (10) to a working system; three (through 12) to a shippable one.**
+**The working system milestone is complete; two phases (11–12) remain before the
+shippable milestone.**
 
 Phase 7 is the heaviest; 6 and 10 are moderate; 8 and 9 are small. Backend is roughly
-4x the frontend, because the frontend is deliberately dependency-light — six runtime
-packages, no `@gems/components`, no router, no form library.
+4x the frontend, because the frontend is deliberately dependency-light — Axios and
+React at runtime, with no router or form library.
 
 ### The one thing effort cannot unblock
 
@@ -64,12 +67,32 @@ Worth starting that conversation in parallel with phases 6–10, not at phase 12
 
 ## Quickstart
 
+One-time setup:
+
 ```bash
-cd backend
-python3.13 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
-cp ../.env.example .env
-.venv/bin/uvicorn app.main:app --reload --port 8000
+python3.13 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements-dev.txt
+cp .env.example backend/.env
+./scripts/download_models.sh
+```
+
+Then, for everything:
+
+```bash
+./scripts/dev.sh
+```
+
+That is the whole run command. It installs web dependencies if `web/node_modules` is
+absent, creates the database named in `DATABASE_URL` if the server does not have it,
+applies pending Alembic migrations, and starts the API on `:8000` and the UI on `:3320`
+together. Ctrl-C stops both, and if either process dies the other is brought down with
+it rather than left orphaned. The only prerequisite it does not install is a running
+PostgreSQL.
+
+Running the API alone, without the UI:
+
+```bash
+cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
 ```bash
@@ -133,6 +156,36 @@ Checks:
 .venv/bin/mypy app/          # strict
 .venv/bin/pytest             # hermetic tier; add -m models for the model tier
 ```
+
+Frontend, when running it on its own rather than through `./scripts/dev.sh`:
+
+```bash
+cd web
+yarn install
+yarn dev                     # http://localhost:3320; proxies /api to :8000
+```
+
+```bash
+yarn lint
+yarn typecheck
+yarn test
+yarn build
+```
+
+The Phase 10 UI loads a registered user by UUID, displays the stored reference,
+validates and previews one candidate portrait, and calls the persisted verification
+workflow. It distinguishes display confidence from raw cosine similarity and gives
+specific retry guidance for no face, multiple faces, blur, lighting, framing, and pose.
+Object URLs are revoked on replacement/unmount, candidate images remain browser-local
+until submission, and the UI has no third-party runtime requests or analytics. Tailwind
+CSS provides the responsive presentation, while a shared Axios instance and focused
+`@services`, `@utils`, `@components`, `@hooks`, and `@interfaces` modules keep transport,
+state, and presentation concerns separate.
+
+The web client is installable as a PWA and precaches only its application shell. API and
+readiness requests use a network-only service-worker policy so biometric uploads,
+profiles, and verification results are never placed in an offline cache. When a new
+version is available, the UI asks the user before activating it.
 
 ## Stack
 
