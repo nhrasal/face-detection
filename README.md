@@ -13,8 +13,8 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 and the core hypothesis is proven: this pipeline
 recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-243 tests — 197 backend hermetic (no models or assets needed), 40 model-tier against
-real weights and portraits, and 6 frontend tests. Backend mypy strict and ruff clean;
+260 tests — 201 backend hermetic (no models or assets needed), 40 model-tier against
+real weights and portraits, and 19 frontend tests. Backend mypy strict and ruff clean;
 frontend TypeScript, ESLint, Vitest, and production build clean.
 
 Photo-to-photo detection and comparison plus user/profile verification are exposed over
@@ -30,9 +30,10 @@ re-encoded under generated storage keys.
 | 5 | Pipeline orchestration + decision layer | backend | done |
 | 6 | Postgres schema, SQLAlchemy models, Alembic, repositories | backend | done |
 | 7 | HTTP layer — detect/compare, errors, rate limiting, warmup | backend | done |
-| 8 | Users, reference resolver, profile upload, verify + history | backend | done |
+| 8 | Users, search, reference resolver, profile upload, verify + history | backend | done |
 | 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | done |
-| 10 | React upload/verify UI with per-reason messaging | frontend | done |
+| 10 | React register/search/verify UI with per-reason messaging | frontend | done |
+| 10a | Live camera capture with real-time detection guidance | frontend | done |
 | 11 | Docker Compose — runs from a clean clone | ops | next |
 | 12 | **Threshold calibration** — V1 is not shippable until this runs | data | |
 | 13 | InsightFace benchmark — optional, see open decisions | backend | |
@@ -117,6 +118,10 @@ curl \
   -F profile_image=@profile.jpg \
   localhost:8000/api/v1/users
 
+curl 'localhost:8000/api/v1/users?search=employee-123'
+
+curl -F frame=@preview.jpg localhost:8000/api/v1/face/detect/frame
+
 curl \
   -F candidate_image=@candidate.jpg \
   localhost:8000/api/v1/users/USER_UUID/verify
@@ -135,6 +140,10 @@ under generated UUID-based keys. Original filenames and original bytes are not r
 Replacing a profile removes the superseded local file only after the database update
 commits. Phase 8 uses local storage behind `ProfileImageStore`; a later deployment can
 replace that boundary with S3/MinIO.
+
+Listing users requires a `search` of at least two characters after stripping, so the
+endpoint cannot be walked to dump the user table, and LIKE wildcards in the query are
+escaped so `%` searches for a literal percent sign rather than matching every row.
 
 ### HTTP security boundary
 
@@ -172,15 +181,43 @@ yarn test
 yarn build
 ```
 
-The Phase 10 UI loads a registered user by UUID, displays the stored reference,
-validates and previews one candidate portrait, and calls the persisted verification
-workflow. It distinguishes display confidence from raw cosine similarity and gives
+The Phase 10 UI registers a profile or finds an existing one by external ID or name,
+displays the stored reference, validates and previews one candidate portrait, and calls
+the persisted verification workflow. It distinguishes display confidence from raw cosine similarity and gives
 specific retry guidance for no face, multiple faces, blur, lighting, framing, and pose.
 Object URLs are revoked on replacement/unmount, candidate images remain browser-local
 until submission, and the UI has no third-party runtime requests or analytics. Tailwind
 CSS provides the responsive presentation, while a shared Axios instance and focused
 `@services`, `@utils`, `@components`, `@hooks`, and `@interfaces` modules keep transport,
 state, and presentation concerns separate.
+
+### Live camera capture
+
+Both the registration form and the candidate step accept a photograph from the
+camera as well as a file. The preview runs at the camera's own frame rate while a
+downscaled 640px JPEG is sampled roughly 2.5 times a second and sent to
+`POST /api/v1/face/detect/frame`, which draws the detection box over the preview
+and turns the result into one instruction at a time — "Move closer", "Hold still
+— ready to capture" — using the same reason codes the verification result speaks.
+Capture stays disabled until the service reports a frame it would accept, so the
+operator is not invited to submit a photo that is about to be rejected.
+
+Frames are sampled one at a time: the next is scheduled only after the previous
+resolves, so a slow service stretches the interval instead of queueing stale
+frames behind it, and a 429 backs off up to four seconds. Nothing sampled for
+guidance is stored or recorded — only the still the operator captures is verified.
+The captured still is the unmirrored frame; the mirrored preview is a comfort
+affordance for the operator, not something that belongs in a stored image.
+
+`/face/detect/frame` is separate from `/face/detect` rather than a looser limit on
+it, in three deliberate ways: a 1 MB payload cap instead of 5 MB, a rate limit
+sized for 2-5 FPS (`RATE_LIMIT_DETECT_FRAME`, 240/minute) instead of 30/minute,
+and the `LARGEST` multi-face policy so a bystander crossing the frame does not
+blank the overlay. The looser rate limit is only safe because the payload cap
+makes each call cheap; pointing it at the 5 MB endpoint would buy 40-megapixel
+decode work 240 times a minute. The still that is finally captured goes through
+the normal `REJECT` path, where a second face is still an error — which is why the
+preview refuses to capture while more than one face is in view.
 
 The web client is installable as a PWA and precaches only its application shell. API and
 readiness requests use a network-only service-worker policy so biometric uploads,
