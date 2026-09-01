@@ -1,4 +1,4 @@
-export type PhotoSource = "upload" | "camera";
+export type PhotoSource = "upload" | "camera" | "liveness";
 
 interface Props {
   source: PhotoSource;
@@ -8,6 +8,10 @@ interface Props {
 const TABS: Array<{ value: PhotoSource; label: string }> = [
   { value: "upload", label: "Upload" },
   { value: "camera", label: "Camera" },
+  // A separate source rather than a toggle on "Camera": the liveness flow
+  // captures the still itself the instant the check passes, so it is a
+  // different interaction, not the same one with a setting.
+  { value: "liveness", label: "Liveness" },
 ];
 
 export function PhotoSourceTabs({ source, onChange }: Props) {

@@ -1,5 +1,6 @@
 import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { CameraCapture } from "@components/CameraCapture";
+import { LivenessCheck } from "@components/LivenessCheck";
 import { PhotoSourceTabs, type PhotoSource } from "@components/PhotoSourceTabs";
 import { FaceService } from "@services/face.service";
 import type { User } from "@interfaces/face";
@@ -67,7 +68,11 @@ export function PortraitComparison({ user, candidate, previewUrl, verifying, onS
             : <PhotoSourceTabs source={source} onChange={setSource} />}
         </div>
         <input ref={inputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={change} />
-        {!candidate && source === "camera" ? (
+        {!candidate && source === "liveness" ? (
+          <div className="mt-5">
+            <LivenessCheck onVerified={onSelect} onCancel={() => setSource("upload")} />
+          </div>
+        ) : !candidate && source === "camera" ? (
           <div className="mt-5">
             <CameraCapture onCapture={onSelect} onCancel={() => setSource("upload")} />
           </div>

@@ -1,5 +1,6 @@
 import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
 import { CameraCapture } from "@components/CameraCapture";
+import { LivenessCheck } from "@components/LivenessCheck";
 import { PhotoSourceTabs, type PhotoSource } from "@components/PhotoSourceTabs";
 import { usePhotoUpload } from "@hooks/usePhotoUpload";
 
@@ -70,7 +71,16 @@ export function UserRegistration({ submitting, onSubmit }: Props) {
         <PhotoSourceTabs source={source} onChange={setSource} />
       </div>
       <input ref={inputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={choose} />
-      {source === "camera" ? (
+      {source === "liveness" ? (
+        <LivenessCheck
+          onVerified={(file) => {
+            setPhotoError(photo.select(file));
+            setMissing(null);
+            setSource("upload");
+          }}
+          onCancel={() => setSource("upload")}
+        />
+      ) : source === "camera" ? (
         <CameraCapture
           onCapture={(file) => {
             setPhotoError(photo.select(file));
