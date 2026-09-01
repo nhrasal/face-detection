@@ -3,14 +3,15 @@ import type { Decision, VerificationResult } from "@interfaces/face";
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-export function validateCandidate(file: File): string | null {
+export function validatePhoto(file: File): string | null {
   if (!ALLOWED_TYPES.has(file.type)) return "Choose a JPEG, PNG, or WebP photograph.";
   if (file.size > MAX_FILE_BYTES) return "The photograph must be 5 MB or smaller.";
   if (file.size === 0) return "The selected file is empty.";
   return null;
 }
 
-const issueMessages: Record<string, string> = {
+/** Shared with the live camera guidance, which speaks the same reason codes. */
+export const issueMessages: Record<string, string> = {
   IMAGE_BLURRY: "The image is out of focus. Hold the camera steady and try again.",
   TOO_DARK: "The face is too dark. Move toward a soft, even light source.",
   TOO_BRIGHT: "The face is overexposed. Move away from direct light.",

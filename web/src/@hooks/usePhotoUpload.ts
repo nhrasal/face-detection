@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { validateCandidate } from "@utils/verification";
+import { validatePhoto } from "@utils/verification";
 
-export function useCandidateImage() {
+export function usePhotoUpload() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -17,7 +17,7 @@ export function useCandidateImage() {
 
   const select = (next?: File): string | null => {
     if (!next) return null;
-    const error = validateCandidate(next);
+    const error = validatePhoto(next);
     // A rejected pick must drop the previous photo too, or the operator sees an
     // error about the new file while the old one stays armed for verification.
     setFile(error ? null : next);

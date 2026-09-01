@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { VerificationResult } from "@interfaces/face";
-import { asPercentage, resultPresentation, similarityLabel, validateCandidate } from "@utils/verification";
+import { asPercentage, resultPresentation, similarityLabel, validatePhoto } from "@utils/verification";
 
 const result = (overrides: Partial<VerificationResult> = {}): VerificationResult => ({
   matched: false, similarity: null, confidence: null, threshold: 0.363,
@@ -8,12 +8,12 @@ const result = (overrides: Partial<VerificationResult> = {}): VerificationResult
   reference_status: "OK", candidate_status: "LOW_QUALITY", processing_time_ms: 24, ...overrides,
 });
 
-describe("candidate validation", () => {
-  it("accepts supported photos", () => expect(validateCandidate(new File(["photo"], "face.jpg", { type: "image/jpeg" }))).toBeNull());
-  it("rejects unsupported types", () => expect(validateCandidate(new File(["x"], "face.gif", { type: "image/gif" }))).toContain("JPEG"));
+describe("photo validation", () => {
+  it("accepts supported photos", () => expect(validatePhoto(new File(["photo"], "face.jpg", { type: "image/jpeg" }))).toBeNull());
+  it("rejects unsupported types", () => expect(validatePhoto(new File(["x"], "face.gif", { type: "image/gif" }))).toContain("JPEG"));
   it("rejects empty and oversized files", () => {
-    expect(validateCandidate(new File([], "empty.png", { type: "image/png" }))).toContain("empty");
-    expect(validateCandidate(new File([new Uint8Array(5 * 1024 * 1024 + 1)], "huge.png", { type: "image/png" }))).toContain("5 MB");
+    expect(validatePhoto(new File([], "empty.png", { type: "image/png" }))).toContain("empty");
+    expect(validatePhoto(new File([new Uint8Array(5 * 1024 * 1024 + 1)], "huge.png", { type: "image/png" }))).toContain("5 MB");
   });
 });
 

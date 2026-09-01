@@ -1,4 +1,6 @@
 import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
+import { CameraCapture } from "@components/CameraCapture";
+import { PhotoSourceTabs, type PhotoSource } from "@components/PhotoSourceTabs";
 import { FaceService } from "@services/face.service";
 import type { User } from "@interfaces/face";
 
@@ -19,6 +21,7 @@ const Corner = ({ className }: { className: string }) => (
 export function PortraitComparison({ user, candidate, previewUrl, verifying, onSelect, onReset, onVerify }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [referenceFailed, setReferenceFailed] = useState(false);
+  const [source, setSource] = useState<PhotoSource>("upload");
   useEffect(() => setReferenceFailed(false), [user.id]);
   const change = (event: ChangeEvent<HTMLInputElement>) => {
     onSelect(event.target.files?.[0]);
@@ -59,20 +62,28 @@ export function PortraitComparison({ user, candidate, previewUrl, verifying, onS
       <article className={card}>
         <div className="flex min-h-14 items-start justify-between gap-4">
           <div><span className="mb-2 block text-xs font-bold tracking-[.18em] text-stone-400">03</span><h2 className="font-serif text-3xl">Candidate photo</h2></div>
-          {candidate && <button className="p-1 text-sm text-emerald-700 underline" onClick={onReset}>Remove</button>}
+          {candidate
+            ? <button className="p-1 text-sm text-emerald-700 underline" onClick={onReset}>Remove</button>
+            : <PhotoSourceTabs source={source} onChange={setSource} />}
         </div>
         <input ref={inputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={change} />
-        <button
-          className="mt-5 grid aspect-[16/11] w-full place-items-center overflow-hidden rounded-xl border-2 border-dashed border-stone-300 bg-stone-100 text-emerald-950 hover:border-emerald-700"
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={drop}
-          type="button"
-        >
-          {previewUrl ? <img className="size-full object-cover" src={previewUrl} alt="Candidate preview" /> : (
-            <span className="flex flex-col items-center gap-2 px-4"><span className="grid size-11 place-items-center rounded-full bg-emerald-950 text-2xl text-white">↑</span><strong>Add a portrait</strong><small className="text-stone-500">Drop here or browse · JPEG, PNG, WebP · max 5 MB</small></span>
-          )}
-        </button>
+        {!candidate && source === "camera" ? (
+          <div className="mt-5">
+            <CameraCapture onCapture={onSelect} onCancel={() => setSource("upload")} />
+          </div>
+        ) : (
+          <button
+            className="mt-5 grid aspect-[16/11] w-full place-items-center overflow-hidden rounded-xl border-2 border-dashed border-stone-300 bg-stone-100 text-emerald-950 hover:border-emerald-700"
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={drop}
+            type="button"
+          >
+            {previewUrl ? <img className="size-full object-cover" src={previewUrl} alt="Candidate preview" /> : (
+              <span className="flex flex-col items-center gap-2 px-4"><span className="grid size-11 place-items-center rounded-full bg-emerald-950 text-2xl text-white">↑</span><strong>Add a portrait</strong><small className="text-stone-500">Drop here or browse · JPEG, PNG, WebP · max 5 MB</small></span>
+            )}
+          </button>
+        )}
         <button className="mt-4 min-h-12 w-full rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!candidate || verifying} onClick={onVerify}>
           {verifying ? "Comparing faces…" : "Verify identity"}
         </button>
