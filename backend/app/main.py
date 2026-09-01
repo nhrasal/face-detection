@@ -13,7 +13,8 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.face import create_face_router, limiter
-from app.api.v1.stream import create_stream_router
+from app.api.v1.liveness import create_liveness_router
+from app.api.v1.stream import SessionLimiter, create_stream_router
 from app.api.v1.users import create_users_router
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
@@ -22,6 +23,7 @@ from app.core.logging import configure_logging, get_logger
 from app.db.session import create_database_engine, create_session_factory
 from app.engine.factory import build_engine
 from app.engine.pool import EnginePool
+from app.services.liveness_session import SessionStore
 from app.services.profile_storage import ProfileImageStore
 
 log = get_logger(__name__)
@@ -122,7 +124,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(create_face_router(settings, limiter), prefix=settings.API_PREFIX)
     app.include_router(create_users_router(settings, limiter), prefix=settings.API_PREFIX)
-    app.include_router(create_stream_router(settings), prefix=settings.API_PREFIX)
+    # One ceiling shared by the preview stream and liveness: both hold an
+    # inference worker per frame, so counting them separately would double the
+    # real load MAX_STREAM_SESSIONS is meant to bound.
+    stream_limiter = SessionLimiter(settings.MAX_STREAM_SESSIONS)
+    app.include_router(create_stream_router(settings, stream_limiter), prefix=settings.API_PREFIX)
+    app.include_router(
+        create_liveness_router(settings, stream_limiter, SessionStore()),
+        prefix=settings.API_PREFIX,
+    )
 
     log.info("app.created", env=settings.ENV, engine=settings.FACE_ENGINE)
     return app

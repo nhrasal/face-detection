@@ -73,9 +73,8 @@ def _origin_allowed(websocket: WebSocket, settings: Settings) -> bool:
     return origin is None or origin in settings.CORS_ORIGINS
 
 
-def create_stream_router(settings: Settings) -> APIRouter:
+def create_stream_router(settings: Settings, sessions: SessionLimiter) -> APIRouter:
     router = APIRouter(prefix="/face", tags=["face"])
-    sessions = SessionLimiter(settings.MAX_STREAM_SESSIONS)
 
     @router.websocket("/stream")
     async def stream_detection(websocket: WebSocket) -> None:
