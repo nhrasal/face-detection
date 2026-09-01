@@ -100,7 +100,11 @@ class PoseSample:
     """What one frame contributes to a liveness judgement."""
 
     yaw: float
-    face_ratio: float
+    # Bounding-box area in PIXELS, not a fraction of the frame. Within a single
+    # session the camera resolution does not change, so comparing pixel area
+    # against the baseline is exactly equivalent to comparing ratios — and it
+    # removes any need to thread frame dimensions through the pipeline.
+    face_area: float
     score: float
 
     @property
@@ -108,7 +112,7 @@ class PoseSample:
         return abs(self.yaw) <= DEFAULT_LIVENESS_THRESHOLDS.yaw_neutral
 
 
-def sample_pose(analysis: ImageAnalysis, frame_area: int) -> PoseSample | None:
+def sample_pose(analysis: ImageAnalysis) -> PoseSample | None:
     """Extract pose from an analysed frame, or None if there is no usable face.
 
     Uses the detected face regardless of whether the QUALITY gate passed: a
@@ -117,11 +121,11 @@ def sample_pose(analysis: ImageAnalysis, frame_area: int) -> PoseSample | None:
     challenge unpassable by construction.
     """
     face = analysis.face
-    if face is None or frame_area <= 0:
+    if face is None or face.bbox.area <= 0:
         return None
     return PoseSample(
         yaw=signed_yaw(face),
-        face_ratio=face.bbox.area / frame_area,
+        face_area=float(face.bbox.area),
         score=face.score,
     )
 
@@ -130,21 +134,21 @@ def satisfies(
     challenge: ChallengeKind,
     sample: PoseSample,
     *,
-    baseline_ratio: float | None = None,
+    baseline_area: float | None = None,
     thresholds: LivenessThresholds = DEFAULT_LIVENESS_THRESHOLDS,
 ) -> bool:
     """Has this frame met the challenge?
 
-    `baseline_ratio` is the face size when the challenge was issued, which
+    `baseline_area` is the face size when the challenge was issued, which
     MOVE_CLOSER is measured against.
     """
     if sample.score < thresholds.min_detection_score:
         return False
 
     if challenge is ChallengeKind.MOVE_CLOSER:
-        if baseline_ratio is None or baseline_ratio <= 0:
+        if baseline_area is None or baseline_area <= 0:
             return False
-        return sample.face_ratio >= baseline_ratio * thresholds.closer_growth
+        return sample.face_area >= baseline_area * thresholds.closer_growth
 
     sign = _YAW_SIGN[challenge]
     return sample.yaw * sign >= thresholds.yaw_target

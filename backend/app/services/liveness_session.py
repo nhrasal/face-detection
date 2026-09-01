@@ -63,7 +63,7 @@ class LivenessSession:
     # turn cannot satisfy "left then right" by drifting through the middle.
     state: SessionState = SessionState.AWAITING_NEUTRAL
     failure: FailureReason | None = None
-    baseline_ratio: float | None = None
+    baseline_area: float | None = None
     # Stamped on the FIRST submitted frame, from whatever clock that call used,
     # rather than defaulting to time.monotonic() here. Defaulting would mix a
     # real clock with an injected one and make every elapsed-time comparison
@@ -122,7 +122,7 @@ class LivenessSession:
                 self.challenge_started_at = now
                 # Face size is captured here, so MOVE_CLOSER is measured from
                 # where this subject actually started rather than an absolute.
-                self.baseline_ratio = sample.face_ratio
+                self.baseline_area = sample.face_area
             return
 
         # `is None`, not `or`: a challenge_started_at of 0.0 is falsy, and `or`
@@ -140,7 +140,7 @@ class LivenessSession:
         if satisfies(
             challenge,
             sample,
-            baseline_ratio=self.baseline_ratio,
+            baseline_area=self.baseline_area,
             thresholds=self.thresholds,
         ):
             self.index += 1

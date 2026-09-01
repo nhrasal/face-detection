@@ -30,11 +30,11 @@ from app.services.liveness_session import (
 )
 from tests.factories.images import make_face
 
-NEUTRAL = PoseSample(yaw=0.0, face_ratio=0.05, score=0.95)
+NEUTRAL = PoseSample(yaw=0.0, face_area=5000.0, score=0.95)
 
 
-def pose(yaw: float, ratio: float = 0.05, score: float = 0.95) -> PoseSample:
-    return PoseSample(yaw=yaw, face_ratio=ratio, score=score)
+def pose(yaw: float, area: float = 5000.0, score: float = 0.95) -> PoseSample:
+    return PoseSample(yaw=yaw, face_area=area, score=score)
 
 
 class TestSignedYaw:
@@ -64,7 +64,7 @@ class TestSignedYaw:
 
 class TestSamplePose:
     def test_returns_none_without_a_face(self) -> None:
-        assert sample_pose(ImageAnalysis(status=FaceStatus.NO_FACE, face_count=0), 1000) is None
+        assert sample_pose(ImageAnalysis(status=FaceStatus.NO_FACE, face_count=0)) is None
 
     def test_uses_the_face_even_when_quality_failed(self) -> None:
         """A challenge asks for a turned head, which the quality gate rejects.
@@ -75,12 +75,13 @@ class TestSamplePose:
         analysis = ImageAnalysis(
             status=FaceStatus.LOW_QUALITY, face_count=1, face=make_face(yaw_offset=0.5)
         )
-        sample = sample_pose(analysis, 640 * 480)
+        sample = sample_pose(analysis)
         assert sample is not None and sample.yaw > 0.3
 
-    def test_rejects_a_zero_area_frame(self) -> None:
+    def test_accepts_a_normal_face(self) -> None:
         analysis = ImageAnalysis(status=FaceStatus.OK, face_count=1, face=make_face())
-        assert sample_pose(analysis, 0) is None
+        sample = sample_pose(analysis)
+        assert sample is not None and sample.face_area > 0
 
 
 class TestSatisfies:
@@ -102,11 +103,11 @@ class TestSatisfies:
 
     def test_move_closer_is_relative_to_the_baseline(self) -> None:
         # Framing varies far too much between cameras for an absolute size bar.
-        assert satisfies(ChallengeKind.MOVE_CLOSER, pose(0.0, ratio=0.10), baseline_ratio=0.05)
-        assert not satisfies(ChallengeKind.MOVE_CLOSER, pose(0.0, ratio=0.055), baseline_ratio=0.05)
+        assert satisfies(ChallengeKind.MOVE_CLOSER, pose(0.0, area=10000), baseline_area=5000)
+        assert not satisfies(ChallengeKind.MOVE_CLOSER, pose(0.0, area=5500), baseline_area=5000)
 
     def test_move_closer_without_a_baseline_cannot_pass(self) -> None:
-        assert not satisfies(ChallengeKind.MOVE_CLOSER, pose(0.0, ratio=0.9), baseline_ratio=None)
+        assert not satisfies(ChallengeKind.MOVE_CLOSER, pose(0.0, area=99999), baseline_area=None)
 
     def test_thresholds_are_injectable(self) -> None:
         strict = LivenessThresholds(yaw_target=0.8)
@@ -187,9 +188,9 @@ class TestSessionProgression:
 
     def test_baseline_is_captured_at_the_neutral_frame(self) -> None:
         session = self.make(ChallengeKind.MOVE_CLOSER)
-        session.submit(pose(0.0, ratio=0.04), now=0.0)
-        assert session.baseline_ratio == pytest.approx(0.04)
-        session.submit(pose(0.0, ratio=0.06), now=1.0)
+        session.submit(pose(0.0, area=4000), now=0.0)
+        assert session.baseline_area == pytest.approx(4000)
+        session.submit(pose(0.0, area=6000), now=1.0)
         assert session.passed
 
 
