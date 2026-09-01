@@ -61,8 +61,23 @@ class Settings(BaseSettings):
     MAX_IMAGE_SIDE: int = 8000
     ALLOWED_MIME: set[str] = {"image/jpeg", "image/png", "image/webp"}
 
+    # A live camera frame is a downscaled JPEG, not a photograph. Its own cap
+    # keeps the high-frequency endpoint cheap per call, so a looser rate limit
+    # there cannot be turned into 40-megapixel decode work.
+    MAX_FRAME_BYTES: int = 1 * 1024 * 1024
+
     RATE_LIMIT_COMPARE: str = "10/minute"
     RATE_LIMIT_DETECT: str = "30/minute"
+    # Live preview runs at 2-5 FPS (roadmap V3 5.3); 240/minute leaves headroom
+    # for 4 FPS without letting the full-size detect endpoint be called that often.
+    RATE_LIMIT_DETECT_FRAME: str = "240/minute"
+
+    # A live WebSocket stream occupies an inference worker for every frame it
+    # sends, so it is bounded by concurrent sessions rather than by a rate limit.
+    # At ~11ms per detection, one 30 FPS viewer costs roughly a third of a core:
+    # this ceiling is the difference between a busy preview and a starved
+    # verification path. Raise it only alongside INFERENCE_WORKERS.
+    MAX_STREAM_SESSIONS: int = Field(default=4, ge=1, le=64)
 
     # --- storage / retention ----------------------------------------------
     # V1 deliberately keeps no candidate images: scores and metadata only.

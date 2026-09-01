@@ -12,31 +12,57 @@ from app.api.schemas import BoundingBoxResponse, CompareResponse, DetectResponse
 from app.core.config import Settings
 from app.core.errors import ImageTooLargeError
 from app.engine.decode import decode_image
-from app.engine.pipeline import ImageAnalysis, analyse
+from app.engine.pipeline import FaceSelectionPolicy, ImageAnalysis, analyse
 from app.engine.pool import EnginePool
 from app.services.decision import decide_comparison
 
 
-async def _read_upload(upload: UploadFile, max_bytes: int) -> bytes:
+async def _read_upload(
+    upload: UploadFile, max_bytes: int, *, detail: str = "MAX_UPLOAD_BYTES"
+) -> bytes:
     data = await upload.read(max_bytes + 1)
     await upload.close()
     if len(data) > max_bytes:
-        raise ImageTooLargeError(
-            f"Image exceeds the {max_bytes}-byte upload limit.", detail="MAX_UPLOAD_BYTES"
-        )
+        raise ImageTooLargeError(f"Image exceeds the {max_bytes}-byte upload limit.", detail=detail)
     return data
 
 
-def _analyse_bytes(pool: EnginePool, data: bytes, settings: Settings) -> ImageAnalysis:
+def _analyse_bytes(
+    pool: EnginePool,
+    data: bytes,
+    settings: Settings,
+    *,
+    max_bytes: int | None = None,
+    multi_face: FaceSelectionPolicy = FaceSelectionPolicy.REJECT,
+    timeout: float = 10.0,
+) -> ImageAnalysis:
     image = decode_image(
         data,
         allowed_mime=settings.ALLOWED_MIME,
-        max_bytes=settings.MAX_UPLOAD_BYTES,
+        max_bytes=settings.MAX_UPLOAD_BYTES if max_bytes is None else max_bytes,
         max_pixels=settings.MAX_IMAGE_PIXELS,
         max_side=settings.MAX_IMAGE_SIDE,
     )
-    with pool.acquire() as engine:
-        return analyse(engine, image)
+    with pool.acquire(timeout=timeout) as engine:
+        return analyse(engine, image, multi_face=multi_face)
+
+
+def _detect_response(analysis: ImageAnalysis) -> DetectResponse:
+    face = analysis.face
+    return DetectResponse(
+        status=analysis.status,
+        face_detected=analysis.face_count > 0,
+        face_count=analysis.face_count,
+        quality_score=analysis.quality.score if analysis.quality else None,
+        quality_issues=[issue.value for issue in analysis.quality.issues]
+        if analysis.quality
+        else [],
+        bounding_box=BoundingBoxResponse(
+            x=face.bbox.x, y=face.bbox.y, width=face.bbox.w, height=face.bbox.h
+        )
+        if face
+        else None,
+    )
 
 
 def create_face_router(settings: Settings, limiter: Limiter) -> APIRouter:
@@ -49,27 +75,31 @@ def create_face_router(settings: Settings, limiter: Limiter) -> APIRouter:
         analysis = await run_in_threadpool(
             _analyse_bytes, request.app.state.engine_pool, data, settings
         )
-        face = analysis.face
-        bbox = (
-            BoundingBoxResponse(
-                x=face.bbox.x,
-                y=face.bbox.y,
-                width=face.bbox.w,
-                height=face.bbox.h,
-            )
-            if face
-            else None
+        return _detect_response(analysis)
+
+    @router.post("/detect/frame", response_model=DetectResponse)
+    @limiter.limit(settings.RATE_LIMIT_DETECT_FRAME)
+    async def detect_frame(
+        request: Request, frame: Annotated[UploadFile, File()]
+    ) -> DetectResponse:
+        """Detect on one live camera frame, for preview guidance only.
+
+        Differs from /detect in three deliberate ways: a much smaller byte cap, a
+        rate limit sized for 2-5 FPS, and the LARGEST multi-face policy, so a
+        bystander wandering through frame does not blank the operator's overlay.
+        Nothing here is recorded — the frame the operator finally captures goes
+        through the normal REJECT path, where a second face is still an error.
+        """
+        data = await _read_upload(frame, settings.MAX_FRAME_BYTES, detail="MAX_FRAME_BYTES")
+        analysis = await run_in_threadpool(
+            _analyse_bytes,
+            request.app.state.engine_pool,
+            data,
+            settings,
+            max_bytes=settings.MAX_FRAME_BYTES,
+            multi_face=FaceSelectionPolicy.LARGEST,
         )
-        return DetectResponse(
-            status=analysis.status,
-            face_detected=analysis.face_count > 0,
-            face_count=analysis.face_count,
-            quality_score=analysis.quality.score if analysis.quality else None,
-            quality_issues=[issue.value for issue in analysis.quality.issues]
-            if analysis.quality
-            else [],
-            bounding_box=bbox,
-        )
+        return _detect_response(analysis)
 
     @router.post("/compare", response_model=CompareResponse)
     @limiter.limit(settings.RATE_LIMIT_COMPARE)
