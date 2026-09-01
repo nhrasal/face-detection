@@ -13,8 +13,8 @@ V1→V5 product roadmap; KYC is V4 and reuses this engine.
 and the core hypothesis is proven: this pipeline
 recognises people. See [Does it work?](#does-it-work) for the measured numbers.
 
-260 tests — 201 backend hermetic (no models or assets needed), 40 model-tier against
-real weights and portraits, and 19 frontend tests. Backend mypy strict and ruff clean;
+270 tests — 207 backend hermetic (no models or assets needed), 40 model-tier against
+real weights and portraits, and 23 frontend tests. Backend mypy strict and ruff clean;
 frontend TypeScript, ESLint, Vitest, and production build clean.
 
 Photo-to-photo detection and comparison plus user/profile verification are exposed over
@@ -33,7 +33,7 @@ re-encoded under generated storage keys.
 | 8 | Users, search, reference resolver, profile upload, verify + history | backend | done |
 | 9 | Security suite — size caps, MIME spoofing, embedding-leak guard | backend | done |
 | 10 | React register/search/verify UI with per-reason messaging | frontend | done |
-| 10a | Live camera capture with real-time detection guidance | frontend | done |
+| 10a | Live camera capture, real-time detection over a WebSocket | full-stack | done |
 | 11 | Docker Compose — runs from a clean clone | ops | next |
 | 12 | **Threshold calibration** — V1 is not shippable until this runs | data | |
 | 13 | InsightFace benchmark — optional, see open decisions | backend | |
@@ -194,30 +194,70 @@ state, and presentation concerns separate.
 ### Live camera capture
 
 Both the registration form and the candidate step accept a photograph from the
-camera as well as a file. The preview runs at the camera's own frame rate while a
-downscaled 640px JPEG is sampled roughly 2.5 times a second and sent to
-`POST /api/v1/face/detect/frame`, which draws the detection box over the preview
-and turns the result into one instruction at a time — "Move closer", "Hold still
-— ready to capture" — using the same reason codes the verification result speaks.
-Capture stays disabled until the service reports a frame it would accept, so the
-operator is not invited to submit a photo that is about to be rejected.
+camera as well as a file. A downscaled 640px JPEG is detected on continuously and
+the box is drawn over the preview in real time, with the result turned into one
+instruction at a time — "Move closer", "Hold still — ready to capture" — using the
+same reason codes the verification result speaks. Capture stays disabled until the
+service reports a frame it would accept, so the operator is not invited to submit a
+photo that is about to be rejected.
 
-Frames are sampled one at a time: the next is scheduled only after the previous
-resolves, so a slow service stretches the interval instead of queueing stale
-frames behind it, and a 429 backs off up to four seconds. Nothing sampled for
-guidance is stored or recorded — only the still the operator captures is verified.
-The captured still is the unmirrored frame; the mirrored preview is a comfort
-affordance for the operator, not something that belongs in a stored image.
+Detection runs over a WebSocket at `/api/v1/face/stream`: one binary JPEG frame in,
+one JSON detection out. It is **ack-paced** — the next frame goes out only once the
+previous result is back — so the stream self-tunes to the rate the pipeline can
+actually sustain rather than queueing frames whose answers describe a scene that has
+already changed. Measured locally, an ack-paced socket sustains **~78 FPS** (a 12.8 ms
+round trip); the client caps itself at **30 FPS**, because nothing above that is visible
+to a person and every frame costs another inference.
 
-`/face/detect/frame` is separate from `/face/detect` rather than a looser limit on
-it, in three deliberate ways: a 1 MB payload cap instead of 5 MB, a rate limit
-sized for 2-5 FPS (`RATE_LIMIT_DETECT_FRAME`, 240/minute) instead of 30/minute,
-and the `LARGEST` multi-face policy so a bystander crossing the frame does not
-blank the overlay. The looser rate limit is only safe because the payload cap
-makes each call cheap; pointing it at the 5 MB endpoint would buy 40-megapixel
-decode work 240 times a minute. The still that is finally captured goes through
-the normal `REJECT` path, where a second face is still an error — which is why the
-preview refuses to capture while more than one face is in view.
+The box tracks every frame, but the words and the Capture button do not. A face
+sitting on the quality threshold flips verdict between adjacent frames, and
+rendering that directly gives a message that strobes and a button that flickers
+under the pointer — so a new verdict must hold for three consecutive frames before
+it replaces the one on screen.
+
+If the upgrade cannot be established — a proxy that does not forward it, or the
+session cap already reached — the client falls back to polling
+`POST /api/v1/face/detect/frame` at 2.5 FPS and labels the frame-rate badge
+`fallback`. The preview degrades; it does not stop working. (Vite's dev proxy needs
+`ws: true` for the upgrade to reach the backend, which `vite.config.ts` sets.)
+
+Nothing sampled for guidance is stored or recorded — only the still the operator
+captures is verified. The captured still is the unmirrored frame; the mirrored
+preview is a comfort affordance for the operator, not something that belongs in a
+stored image.
+
+#### What a live stream costs
+
+**This is the one part of the system that does not scale by adding rate limits.**
+A stream occupies an inference worker for every frame it sends, so at ~11 ms per
+detection a single 30 FPS viewer costs roughly a third of a CPU core. Concurrency
+is therefore bounded by `MAX_STREAM_SESSIONS` (default 4) rather than by a rate
+limit, a frame that cannot get a worker within 500 ms fails fast instead of
+queueing ahead of a verification someone is waiting on, and the session ceiling
+should only be raised alongside `INFERENCE_WORKERS`. The roadmap's own advice at
+V3 5.3 — "do not continuously upload full 30 FPS video" — is about exactly this
+cost, and it is accepted here deliberately in exchange for a genuinely real-time
+overlay. A deployment expecting many simultaneous operators should move detection
+into the browser instead.
+
+Two guards apply that the HTTP endpoints get for free. WebSockets bypass CORS
+entirely, so the origin allowlist is enforced in the handler: a *mismatched*
+Origin fails the handshake outright, while a missing one (a non-browser client,
+which is not what the same-origin policy protects against) is allowed. And a
+session refused for the capacity cap is accepted and *then* closed with code 4429,
+because a browser only ever sees code 1006 for a handshake refused outright — the
+operator would otherwise drop to the slow fallback with no way to learn why.
+
+The HTTP `/face/detect/frame` endpoint that backs the fallback is separate from
+`/face/detect` in three deliberate ways: a 1 MB payload cap instead of 5 MB, a rate
+limit sized for 2-5 FPS (`RATE_LIMIT_DETECT_FRAME`, 240/minute) instead of
+30/minute, and the `LARGEST` multi-face policy — shared with the stream — so a
+bystander crossing the frame does not blank the overlay. The looser rate limit is
+only safe because the payload cap makes each call cheap; pointing it at the 5 MB
+endpoint would buy 40-megapixel decode work 240 times a minute. The still that is
+finally captured goes through the normal `REJECT` path, where a second face is
+still an error — which is why the preview refuses to capture while more than one
+face is in view.
 
 The web client is installable as a PWA and precaches only its application shell. API and
 readiness requests use a network-only service-worker policy so biometric uploads,
