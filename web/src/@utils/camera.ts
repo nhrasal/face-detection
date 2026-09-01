@@ -13,6 +13,16 @@ export const CAPTURE_QUALITY = 0.92;
 export const FRAME_INTERVAL_MS = 400;
 
 /**
+ * How long a frame must stay good before it is captured automatically.
+ *
+ * `stabiliseGuidance` already suppresses single-frame flicker, but three frames
+ * is under a tenth of a second at full rate — quick enough to snap someone who
+ * is still settling into position. This dwell is for the person, not the
+ * detector: long enough to feel deliberate, short enough not to feel stuck.
+ */
+export const AUTO_CAPTURE_HOLD_MS = 800;
+
+/**
  * Ceiling for the live stream: 30 FPS.
  *
  * The socket is ack-paced, so it would otherwise run as fast as the round trip
@@ -131,7 +141,10 @@ export function frameGuidance(detection: LiveDetection | null): Guidance {
       ready: false,
     };
   }
-  return { message: "Hold still — ready to capture.", ready: true };
+  // No instruction to capture: both camera panels take the photo themselves
+  // once this has held. Saying "ready to capture" would advertise a button that
+  // is not there.
+  return { message: "Hold still.", ready: true };
 }
 
 export const INITIAL_GUIDANCE: Guidance = { message: "Looking for a face…", ready: false };
@@ -153,10 +166,10 @@ export const initialGuidanceState = (): GuidanceState => ({
  *
  * Per-frame truth is not per-frame *advice*: a face hovering on the quality
  * threshold flips verdict between adjacent frames, and rendering that directly
- * gives a message that strobes and a Capture button that flickers in and out
- * under the pointer. A new verdict has to hold for `streak` consecutive frames
- * before it replaces the one on screen, so the box stays real-time while the
- * words stay readable.
+ * gives a message that strobes — and, now that capture is automatic, a shutter
+ * that fires on a frame the next one would have rejected. A new verdict has to
+ * hold for `streak` consecutive frames before it replaces the one on screen, so
+ * the box stays real-time while the words stay readable.
  */
 export function stabiliseGuidance(
   state: GuidanceState,

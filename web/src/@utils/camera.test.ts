@@ -66,6 +66,13 @@ describe("frameGuidance", () => {
     expect(frameGuidance(null)).toEqual({ message: "Looking for a face…", ready: false });
   });
 
+  it("never advertises a shutter button, because there is not one", () => {
+    // Both camera panels capture themselves once `ready` has held. Telling the
+    // person to press something would send them looking for a control that was
+    // deliberately removed.
+    expect(frameGuidance(detection()).message).not.toMatch(/capture|press|button|tap|click/i);
+  });
+
   it("is ready only when the service says the frame is OK", () => {
     expect(frameGuidance(detection()).ready).toBe(true);
   });

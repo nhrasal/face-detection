@@ -11,6 +11,8 @@ interface Props {
   previewUrl: string | null;
   verifying: boolean;
   onSelect: (file?: File) => void;
+  /** A photo from the live camera, which verifies without a further click. */
+  onCapture: (file: File) => void;
   onReset: () => void;
   onVerify: () => void;
 }
@@ -19,7 +21,7 @@ const Corner = ({ className }: { className: string }) => (
   <span className={`absolute size-7 border-lime-200 ${className}`} aria-hidden="true" />
 );
 
-export function PortraitComparison({ user, candidate, previewUrl, verifying, onSelect, onReset, onVerify }: Props) {
+export function PortraitComparison({ user, candidate, previewUrl, verifying, onSelect, onCapture, onReset, onVerify }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [referenceFailed, setReferenceFailed] = useState(false);
   const [source, setSource] = useState<PhotoSource>("upload");
@@ -70,11 +72,11 @@ export function PortraitComparison({ user, candidate, previewUrl, verifying, onS
         <input ref={inputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onChange={change} />
         {!candidate && source === "liveness" ? (
           <div className="mt-5">
-            <LivenessCheck onVerified={onSelect} onCancel={() => setSource("upload")} />
+            <LivenessCheck onVerified={onCapture} onCancel={() => setSource("upload")} />
           </div>
         ) : !candidate && source === "camera" ? (
           <div className="mt-5">
-            <CameraCapture onCapture={onSelect} onCancel={() => setSource("upload")} />
+            <CameraCapture onCapture={onCapture} onCancel={() => setSource("upload")} />
           </div>
         ) : (
           <button
@@ -89,6 +91,8 @@ export function PortraitComparison({ user, candidate, previewUrl, verifying, onS
             )}
           </button>
         )}
+        {/* Still here for the upload path, and as the progress indicator while an
+            auto-verify from the camera is in flight. */}
         <button className="mt-4 min-h-12 w-full rounded-xl bg-emerald-700 px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!candidate || verifying} onClick={onVerify}>
           {verifying ? "Comparing faces…" : "Verify identity"}
         </button>

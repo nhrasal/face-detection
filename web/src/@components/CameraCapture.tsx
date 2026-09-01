@@ -1,17 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useCamera } from "@hooks/useCamera";
 import { useLiveDetection } from "@hooks/useLiveDetection";
+import { useStableGuidance } from "@hooks/useStableGuidance";
 import {
+  AUTO_CAPTURE_HOLD_MS,
   CAPTURE_MAX_SIDE,
   CAPTURE_QUALITY,
-  INITIAL_GUIDANCE,
-  type Guidance,
-  frameGuidance,
   frameToFile,
   grabFrame,
-  initialGuidanceState,
   overlayBox,
-  stabiliseGuidance,
 } from "@utils/camera";
 
 interface Props {
@@ -21,6 +18,14 @@ interface Props {
 
 const DEFAULT_ASPECT = 4 / 3;
 
+/**
+ * Live preview that takes the photo itself once the frame is good.
+ *
+ * There is no shutter button. The service is already judging every frame and
+ * saying what to fix, so a button would only ask the operator to confirm a
+ * verdict they just watched arrive — and it invites the one thing the guidance
+ * exists to prevent, which is capturing anyway while the frame is bad.
+ */
 export function CameraCapture({ onCapture, onCancel }: Props) {
   const { videoRef, state, error, start } = useCamera();
   const { detection, error: detectionError, transport, fps } = useLiveDetection(
@@ -29,21 +34,14 @@ export function CameraCapture({ onCapture, onCancel }: Props) {
   );
   const [aspect, setAspect] = useState(DEFAULT_ASPECT);
   const [capturing, setCapturing] = useState(false);
+  const [captured, setCaptured] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   useEffect(() => void start(), [start]);
 
-  // The box tracks every frame, but the words and the Capture button only change
-  // once a new verdict has held for a few frames — see stabiliseGuidance.
-  const [guidance, setGuidance] = useState<Guidance>(INITIAL_GUIDANCE);
-  const stabiliser = useRef(initialGuidanceState());
-  useEffect(() => {
-    stabiliser.current = stabiliseGuidance(stabiliser.current, frameGuidance(detection));
-    const { shown } = stabiliser.current;
-    setGuidance((current) =>
-      current.message === shown.message && current.ready === shown.ready ? current : shown,
-    );
-  }, [detection]);
+  // The box tracks every frame; the words — and the shutter that follows them —
+  // only move once a verdict has held for a few frames. See useStableGuidance.
+  const guidance = useStableGuidance(detection);
 
   const box =
     detection?.result.bounding_box &&
@@ -53,7 +51,7 @@ export function CameraCapture({ onCapture, onCancel }: Props) {
       true,
     );
 
-  const capture = async () => {
+  const capture = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
     setCapturing(true);
@@ -61,14 +59,26 @@ export function CameraCapture({ onCapture, onCancel }: Props) {
     try {
       const frame = await grabFrame(video, CAPTURE_MAX_SIDE, CAPTURE_QUALITY);
       if (!frame) {
-        setCaptureError("The camera is not ready yet. Try again in a moment.");
+        // `captured` stays false, so the dwell below simply arms again on the
+        // next good frame rather than stranding the operator.
+        setCaptureError("The camera is not ready yet. Still trying…");
         return;
       }
+      setCaptured(true);
       onCapture(frameToFile(frame.blob));
     } finally {
       setCapturing(false);
     }
-  };
+  }, [videoRef, onCapture]);
+
+  // Fire once the good verdict has held for a moment. Cleared the instant the
+  // frame stops being good, so a face that drifts out of position mid-dwell is
+  // never photographed on the strength of a verdict that has since expired.
+  useEffect(() => {
+    if (state !== "live" || !guidance.ready || capturing || captured) return;
+    const timer = setTimeout(() => void capture(), AUTO_CAPTURE_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [state, guidance.ready, capturing, captured, capture]);
 
   // Self-contained viewfinder styling: this panel sits inside both the light
   // candidate card and the dark registration panel, so it cannot inherit either.
@@ -159,7 +169,7 @@ export function CameraCapture({ onCapture, onCancel }: Props) {
         role="status"
         aria-live="polite"
       >
-        {guidance.message}
+        {capturing ? "Taking the photo…" : guidance.message}
         {detectionError && <span className="block text-xs text-stone-400">{detectionError}</span>}
         {captureError && <span className="block text-orange-200">{captureError}</span>}
       </p>
@@ -167,15 +177,7 @@ export function CameraCapture({ onCapture, onCancel }: Props) {
       <div className="mt-1 flex gap-2">
         <button
           type="button"
-          className="min-h-12 flex-1 rounded-xl bg-lime-200 px-5 py-3 font-bold text-emerald-950 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={state !== "live" || !guidance.ready || capturing}
-          onClick={() => void capture()}
-        >
-          {capturing ? "Capturing…" : "Capture photo"}
-        </button>
-        <button
-          type="button"
-          className="rounded-xl border border-stone-600 px-4 py-3 text-sm font-bold text-white"
+          className="min-h-12 w-full rounded-xl border border-stone-600 px-4 py-3 text-sm font-bold text-white"
           onClick={onCancel}
         >
           Cancel

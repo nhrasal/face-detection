@@ -8,10 +8,12 @@ interface Props {
 const TABS: Array<{ value: PhotoSource; label: string }> = [
   { value: "upload", label: "Upload" },
   { value: "camera", label: "Camera" },
-  // A separate source rather than a toggle on "Camera": the liveness flow
-  // captures the still itself the instant the check passes, so it is a
-  // different interaction, not the same one with a setting.
-  { value: "liveness", label: "Liveness" },
+  // A separate source rather than a toggle on "Camera": this flow asks for a
+  // blink and captures the still itself once it lands, so it is a different
+  // interaction, not the same one with a setting. Still labelled "Live check"
+  // rather than "Liveness": a blink rules out a photograph, but a video replay
+  // and a deepfake both blink — see backend app/engine/liveness.py.
+  { value: "liveness", label: "Live check" },
 ];
 
 export function PhotoSourceTabs({ source, onChange }: Props) {

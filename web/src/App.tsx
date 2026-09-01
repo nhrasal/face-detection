@@ -101,18 +101,40 @@ function App() {
     setError(candidate.select(file));
   };
 
-  const verify = async () => {
-    if (!user || !candidate.file) return;
+  // A live capture has already been through the check the server ran on the
+  // preview, so the operator has watched it confirm the frame in real time.
+  // Making them press Verify afterwards asks for a second opinion on something
+  // they just saw decided, so the camera paths go straight through.
+  //
+  // Deliberately NOT extended to the file picker: every verification writes an
+  // audit row, and auto-firing on each pick would record an attempt for a file
+  // chosen by mistake.
+  const captureAndVerify = (file: File) => {
+    setResult(null);
+    const problem = candidate.select(file);
+    setError(problem);
+    if (!problem) void verifyPhoto(file);
+  };
+
+  // Takes the file rather than reading `candidate.file`, because an auto-verify
+  // fires in the same tick as the select() that armed it — the state update has
+  // not landed yet, so reading it back would verify the PREVIOUS photo.
+  const verifyPhoto = async (file: File) => {
+    if (!user) return;
     verifyRef.current?.abort();
     const controller = new AbortController();
     verifyRef.current = controller;
     setVerifying(true); setError(null); setResult(null);
-    try { setResult(await FaceService.verifyUser(user.id, candidate.file, controller.signal)); }
+    try { setResult(await FaceService.verifyUser(user.id, file, controller.signal)); }
     catch (caught) {
       if (isCanceled(caught)) return;
       setError(caught instanceof ApiError ? caught.message : "Verification failed. Try again.");
     }
     finally { if (verifyRef.current === controller) setVerifying(false); }
+  };
+
+  const verify = () => {
+    if (candidate.file) void verifyPhoto(candidate.file);
   };
 
   const resetCandidate = () => { candidate.reset(); setResult(null); setError(null); };
@@ -130,7 +152,7 @@ function App() {
         : <UserRegistration submitting={registering} onSubmit={(externalId, name, photo) => void registerUser(externalId, name, photo)} />}
     </ProfileSection>
     {error && <div className="mt-5 rounded-lg border-l-4 border-orange-600 bg-orange-50 p-4 text-orange-900" role="alert">{error}</div>}
-    {user && <PortraitComparison user={user} candidate={candidate.file} previewUrl={candidate.previewUrl} verifying={verifying} onSelect={chooseFile} onReset={resetCandidate} onVerify={() => void verify()} />}
+    {user && <PortraitComparison user={user} candidate={candidate.file} previewUrl={candidate.previewUrl} verifying={verifying} onSelect={chooseFile} onCapture={captureAndVerify} onReset={resetCandidate} onVerify={verify} />}
     {result && <ResultPanel result={result} />}
     <footer className="mt-14 flex flex-col justify-between gap-2 border-t border-stone-300 pt-5 text-xs text-stone-500 sm:flex-row"><span>Face Check · V1 photo verification</span><span>Scores and metadata only</span></footer>
     <PwaUpdatePrompt />
