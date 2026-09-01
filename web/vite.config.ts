@@ -33,7 +33,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:8000",
+      // ws:true so the live camera stream's upgrade request is forwarded too;
+      // without it /api/v1/face/stream never reaches the backend in development.
+      "/api": { target: "http://localhost:8000", ws: true },
       "/healthz": "http://localhost:8000",
       "/readyz": "http://localhost:8000",
     },
