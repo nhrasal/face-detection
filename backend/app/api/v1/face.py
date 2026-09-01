@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Annotated
 
+import numpy as np
 from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from slowapi import Limiter
@@ -27,6 +28,32 @@ async def _read_upload(
     return data
 
 
+def _analyse_bytes_with_image(
+    pool: EnginePool,
+    data: bytes,
+    settings: Settings,
+    *,
+    max_bytes: int | None = None,
+    multi_face: FaceSelectionPolicy = FaceSelectionPolicy.REJECT,
+    timeout: float = 10.0,
+) -> tuple[ImageAnalysis, np.ndarray]:
+    """As `_analyse_bytes`, but hands back the decoded pixels too.
+
+    The liveness check measures eye patches, which needs the image and not just
+    the analysis. Returning it from the one call that already decoded is what
+    keeps that from costing a second decode per frame on a live socket.
+    """
+    image = decode_image(
+        data,
+        allowed_mime=settings.ALLOWED_MIME,
+        max_bytes=settings.MAX_UPLOAD_BYTES if max_bytes is None else max_bytes,
+        max_pixels=settings.MAX_IMAGE_PIXELS,
+        max_side=settings.MAX_IMAGE_SIDE,
+    )
+    with pool.acquire(timeout=timeout) as engine:
+        return analyse(engine, image, multi_face=multi_face), image
+
+
 def _analyse_bytes(
     pool: EnginePool,
     data: bytes,
@@ -36,15 +63,15 @@ def _analyse_bytes(
     multi_face: FaceSelectionPolicy = FaceSelectionPolicy.REJECT,
     timeout: float = 10.0,
 ) -> ImageAnalysis:
-    image = decode_image(
+    analysis, _ = _analyse_bytes_with_image(
+        pool,
         data,
-        allowed_mime=settings.ALLOWED_MIME,
-        max_bytes=settings.MAX_UPLOAD_BYTES if max_bytes is None else max_bytes,
-        max_pixels=settings.MAX_IMAGE_PIXELS,
-        max_side=settings.MAX_IMAGE_SIDE,
+        settings,
+        max_bytes=max_bytes,
+        multi_face=multi_face,
+        timeout=timeout,
     )
-    with pool.acquire(timeout=timeout) as engine:
-        return analyse(engine, image, multi_face=multi_face)
+    return analysis
 
 
 def _detect_response(analysis: ImageAnalysis) -> DetectResponse:

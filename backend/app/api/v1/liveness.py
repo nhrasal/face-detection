@@ -1,15 +1,25 @@
-"""Challenge-response liveness over a WebSocket.
+"""Passive presence check over a WebSocket.
 
 Protocol, deliberately minimal:
 
-    server -> {"type": "challenge", "challenge": "TURN_LEFT", "progress": [0, 3],
-               "state": "AWAITING_NEUTRAL", "session_id": "..."}
+    server -> {"type": "start", "progress": [0, 10],
+               "state": "AWAITING_FACE", "session_id": "...", "detection": null}
     client -> <binary JPEG frame>
-    server -> {"type": "progress", ...}            one per frame
-    server -> {"type": "result", "passed": true}   then close
+    server -> {"type": "progress", ..., "detection": {...},
+               "eye": {"openness": .., "baseline": .., "ratio": ..}}  one per frame
+    server -> {"type": "result", "passed": true}              then close
 
-The session lives on the server. A client cannot report its own liveness result,
-because a client that can assert "I passed" is not a liveness check at all.
+Every progress message carries the same detection payload the preview stream
+returns, so the client can draw the box and say the ONE thing that needs fixing.
+Without it a subject whose face is too dark or too far away just watches a bar
+that never moves, with nothing to act on.
+
+The subject holds still until the run is long enough, then blinks. What that
+does and does not prove is spelled out in `app.engine.liveness`: it defeats a
+photograph or a screen, and it does not defeat a video replay or a deepfake.
+
+The session still lives on the server. A client cannot report its own result,
+because a client that can assert "I passed" is not a check at all.
 """
 
 from __future__ import annotations
@@ -20,7 +30,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from starlette.websockets import WebSocketState
 
-from app.api.v1.face import _analyse_bytes
+from app.api.v1.face import _analyse_bytes_with_image, _detect_response
 from app.api.v1.stream import (
     ACQUIRE_TIMEOUT_SECONDS,
     CLOSE_FORBIDDEN_ORIGIN,
@@ -32,21 +42,55 @@ from app.api.v1.stream import (
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.engine.liveness import sample_pose
+from app.engine.liveness import PresenceSample, sample_presence
 from app.engine.pipeline import FaceSelectionPolicy
 from app.services.liveness_session import LivenessSession, SessionStore
 
 log = get_logger(__name__)
 
 
-def _state_message(session: LivenessSession, message_type: str) -> dict[str, Any]:
+def _eye_diagnostic(
+    session: LivenessSession, sample: PresenceSample | None
+) -> dict[str, Any] | None:
+    """The raw eye numbers, for tuning the threshold against a real camera.
+
+    The closed threshold cannot be set from still photographs: what it has to
+    clear is how far an OPEN eye wanders frame to frame, and a still cannot show
+    that. Putting the live values on the wire is what lets that be measured on
+    the face and camera actually in front of the service.
+
+    Nothing here is biometric — two scalars describing local contrast, from which
+    no face can be reconstructed or recognised.
+    """
+    if sample is None or sample.openness is None:
+        return None
+    baseline = session.baseline
+    return {
+        "openness": round(sample.openness, 4),
+        "baseline": round(baseline, 4) if baseline is not None else None,
+        "ratio": round(sample.openness / baseline, 4)
+        if baseline is not None and baseline > 0
+        else None,
+    }
+
+
+def _state_message(
+    session: LivenessSession,
+    message_type: str,
+    detection: dict[str, Any] | None = None,
+    sample: PresenceSample | None = None,
+) -> dict[str, Any]:
     done, total = session.progress
     return {
         "type": message_type,
         "session_id": session.id,
         "state": session.state.value,
-        "challenge": session.current.value if session.current else None,
         "progress": [done, total],
+        "eye": _eye_diagnostic(session, sample),
+        # None whenever the frame could not be analysed at all, which the client
+        # must render as "still looking" rather than as a stale verdict. This is
+        # the ordinary detect schema and so carries no embedding, by construction.
+        "detection": detection,
     }
 
 
@@ -73,8 +117,8 @@ def create_liveness_router(
         await websocket.accept()
         try:
             session = store.create()
-            log.info("liveness.opened", session=session.id, sequence=len(session.sequence))
-            await websocket.send_json(_state_message(session, "challenge"))
+            log.info("liveness.opened", session=session.id, required=session.required_frames)
+            await websocket.send_json(_state_message(session, "start"))
 
             while not session.finished:
                 frame = await websocket.receive_bytes()
@@ -109,8 +153,8 @@ def create_liveness_router(
         websocket: WebSocket, session: LivenessSession, frame: bytes
     ) -> dict[str, Any]:
         try:
-            analysis = await run_in_threadpool(
-                _analyse_bytes,
+            analysis, image = await run_in_threadpool(
+                _analyse_bytes_with_image,
                 websocket.app.state.engine_pool,
                 frame,
                 settings,
@@ -120,8 +164,8 @@ def create_liveness_router(
             )
         except AppError:
             # A frame the pipeline refused is a missing observation, not a
-            # failed challenge: a camera still warming up should not cost
-            # someone their attempt.
+            # failure: a camera still warming up should not cost someone their
+            # attempt.
             session.submit(None)
             return _state_message(session, "progress")
         except Exception as error:
@@ -129,7 +173,13 @@ def create_liveness_router(
             session.submit(None)
             return _state_message(session, "progress")
 
-        session.submit(sample_pose(analysis))
-        return _state_message(session, "progress")
+        sample = sample_presence(analysis, image)
+        session.submit(sample)
+        return _state_message(
+            session,
+            "progress",
+            _detect_response(analysis).model_dump(mode="json"),
+            sample=sample,
+        )
 
     return router

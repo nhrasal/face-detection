@@ -1,180 +1,250 @@
-"""Active challenge-response liveness.
+"""Blink-gated presence check for live capture.
 
-The problem this exists for: a printed photograph or a phone screen held to the
-camera verifies exactly like a live person. Live capture without liveness is
-arguably WORSE than an upload, because it creates the impression that someone
-was seen in person while guaranteeing nothing.
+WHAT THIS IS: a gate that waits until the camera has held a USABLE face — one
+the detector is confident about and that clears the pipeline's own quality bar —
+and has then seen that face BLINK. Only after both does it let the caller grab
+the still.
 
-The approach is deliberately geometric rather than learned. The service asks for
-a randomised sequence of head movements and checks they happen, in order, within
-a time budget. That is a deterministic measurement — "did signed yaw exceed this
-value in the requested direction" — with no score to calibrate. A learned
-passive anti-spoof model would need spoof samples to set its threshold, and
-shipping one with a guessed threshold repeats the mistake this project has been
-careful to avoid everywhere else.
+WHAT IT DEFEATS: a printed photograph, a still on a phone or laptop screen, an
+AI-generated portrait. None of them can close and reopen an eye.
 
-WHAT THIS DEFEATS: a printed photo, a static image on a screen, a still held up
-to the lens.
+WHAT IT DOES NOT DEFEAT: a recorded video of the enrolled person blinking, or a
+live deepfake driven in real time — both blink perfectly well. Closing that gap
+needs passive texture or depth analysis, which is a learned model whose
+threshold has to be calibrated against real spoof samples. Out of scope here,
+and stated plainly rather than left to be discovered.
 
-WHAT IT DOES NOT DEFEAT: a pre-recorded video replay that happens to contain the
-requested motions, or a live deepfake driven in real time. Randomising the
-sequence per session raises the cost of a replay attack but does not close it.
-Closing it needs passive texture/depth analysis, which is complementary to this
-and explicitly not included. That limitation is stated in the README rather than
-left to be discovered.
+HOW THE EYE IS MEASURED, and why it is done this way: YuNet gives exactly ONE
+landmark per eye, so the standard Eye Aspect Ratio — which needs roughly six
+contour points per eye — is not available. Instead a patch is cropped around
+each eye landmark, sized from the interocular distance, and its normalised
+intensity spread is measured. An open eye puts a dark pupil beside bright sclera
+inside that patch and the spread is high; a closed lid is comparatively smooth
+skin and the spread falls.
+
+The absolute value of that number means nothing across people, cameras and
+lighting, so it is never compared against a fixed bar. Each session builds its
+own baseline from the frames it has already seen and looks for a transient DIP
+below it. That is the same reasoning the rest of this codebase applies to
+thresholds: a relative measurement that calibrates itself beats an absolute one
+guessed in advance.
+
+THE FALSE-BLINK VECTOR, and the guard against it. Motion blur suppresses exactly
+the high-frequency eye detail this metric reads, so a blurred frame looks like a
+closed eye — which would let someone mint a "blink" by shaking a printed photo,
+and would also fire on ordinary camera shake. Measured across the 11 test
+portraits: blurring the whole frame drops the eye metric to 0.57-0.83 of its open
+value, straddling the closed threshold. Normalising by the rest of the face does
+not rescue it (0.64 worst), because blur costs the eye region proportionally more
+than the flatter areas around it.
+
+What does separate them is face-wide sharpness. Shutting the eyes leaves it at
+0.66-1.01 of baseline; blurring the frame collapses it to 0.01. So eye readings
+are simply DISCARDED on any frame whose face sharpness has fallen well below the
+session's own baseline. A blink never trips that gate; blur always does.
+
+CALIBRATION STATUS: the direction of the signal is verified — shut eyes produce
+an unambiguous collapse. The exact dip ratio is NOT verified, because there are
+no closed-eye samples in the test set; the numbers below are reasoned, not
+measured, and are the first thing a labelled blink set should replace. See
+README calibration.
 """
 
 from __future__ import annotations
 
-import secrets
 from dataclasses import dataclass
-from enum import StrEnum
+
+import cv2
+import numpy as np
 
 from app.engine.pipeline import ImageAnalysis
-from app.engine.types import LM_EYE_LEFT, LM_EYE_RIGHT, LM_NOSE, DetectedFace
+from app.engine.types import LM_EYE_LEFT, LM_EYE_RIGHT, DetectedFace
 
+# The preview socket is ack-paced and settles somewhere between 5 and 30 FPS
+# depending on the hardware, so this is roughly one to two seconds of a steady
+# face. Counted in FRAMES rather than seconds because it is the RUN that carries
+# the meaning, and because these same frames are what the eye baseline is built
+# from — a baseline needs samples, not elapsed time.
+DEFAULT_REQUIRED_FRAMES = 10
 
-class ChallengeKind(StrEnum):
-    """Named from the SUBJECT's point of view — what the person is told to do.
+# The eye patch, as fractions of interocular distance. WIDE AND SHORT, because
+# that is the shape of an eye: the aperture is roughly 0.35 x 0.12 of the
+# interocular distance, and everything else in the neighbourhood — brow, socket,
+# cheek — looks identical open or shut and only dilutes the measurement.
+#
+# Sized from measurement, not taste. A square 0.28 patch leaves the aperture at
+# about 13% of its area, and across the 11 test portraits a realistic closure
+# then moves the metric only to 0.63-0.95 of its open value: most faces never
+# reach the closed threshold at all, and the check silently never fires. At
+# 0.18 x 0.09 the same closure lands at 0.27-0.63 — every face clears it.
+EYE_PATCH_WIDTH_SCALE = 0.18
+EYE_PATCH_HEIGHT_SCALE = 0.09
 
-    The camera sees left and right mirrored, so the mapping onto a measured
-    signed yaw lives in exactly one place (`_YAW_SIGN`) rather than being
-    re-derived at each call site. Getting it backwards is the same class of
-    silent bug as mirrored landmarks: nothing raises, the challenge simply
-    becomes unpassable.
-    """
-
-    TURN_LEFT = "TURN_LEFT"
-    TURN_RIGHT = "TURN_RIGHT"
-    MOVE_CLOSER = "MOVE_CLOSER"
-
-
-# A subject turning their head to their own left rotates their nose toward the
-# camera's right, so signed yaw goes positive. Verified against the measured
-# spread of real portraits rather than assumed from geometry alone.
-_YAW_SIGN: dict[ChallengeKind, float] = {
-    ChallengeKind.TURN_LEFT: +1.0,
-    ChallengeKind.TURN_RIGHT: -1.0,
-}
-
-POSE_CHALLENGES = (ChallengeKind.TURN_LEFT, ChallengeKind.TURN_RIGHT)
+# Below this the patch is a handful of pixels and its spread is noise. The
+# quality gate's min_interocular_px is 32, so in practice this only fires for
+# faces it has already rejected.
+MIN_INTEROCULAR_PX = 24.0
 
 
 @dataclass(frozen=True, slots=True)
-class LivenessThresholds:
-    # Frontal portraits measure within +-0.11 signed yaw; genuinely turned heads
-    # reach +0.60 and -0.35. 0.30 clears the frontal band with margin while
-    # staying comfortably reachable.
-    yaw_target: float = 0.30
-    # A face must return near-frontal between challenges, so one sustained turn
-    # cannot satisfy a "left then right" sequence by drifting through it.
-    yaw_neutral: float = 0.12
-    # MOVE_CLOSER is relative to where the subject started, not an absolute size:
-    # framing varies far too much between cameras for an absolute bar.
-    closer_growth: float = 1.30
+class PresenceThresholds:
+    # The same bar the quality gate already applies, kept injectable so live
+    # capture can be made stricter than a single-photo upload without disturbing
+    # the tested behaviour of `assess_quality`.
     min_detection_score: float = 0.75
 
+    # A blink is a dip to this fraction of the session's own baseline.
+    #
+    # A FULL closure measures 0.27-0.63 across the test portraits, so this sits
+    # above the worst of those with room to spare. The margin is deliberate: a
+    # blink lasts 100-400ms and the socket samples at 5-30 FPS, so the frame
+    # that lands may catch the lid halfway rather than shut, and a half-closed
+    # eye dips less than a shut one.
+    #
+    # PROVISIONAL, and loose rather than tight on purpose — the failure this
+    # setting is recovering from was a check that never fired. What it cannot be
+    # set from is still-image data: the number that matters is how far an OPEN
+    # eye wanders frame to frame, and that needs video of real faces. Tighten it
+    # once that exists.
+    eyes_closed_ratio: float = 0.75
 
-DEFAULT_LIVENESS_THRESHOLDS = LivenessThresholds()
+    # Recovery is deliberately a HIGHER bar than the close, so a signal hovering
+    # exactly on the threshold cannot rattle between open and closed and mint
+    # blinks out of noise. Standard hysteresis.
+    eyes_open_ratio: float = 0.85
+
+    # Eye readings are discarded below this fraction of the session's peak face
+    # sharpness. Sits in the wide gap measured between a blink (0.66 of baseline
+    # at worst) and a blurred frame (0.01), so it rejects the blur that would
+    # otherwise read as a blink without ever discarding a real one.
+    min_sharpness_ratio: float = 0.50
+
+    # The baseline tracks the peak openness seen, decayed slowly. Without decay
+    # a single bright frame would set an unreachable reference for the rest of
+    # the session; with it, the baseline follows someone walking into worse
+    # light. Slow enough that a blink lasting a dozen frames cannot drag the
+    # baseline down to meet itself.
+    baseline_decay: float = 0.99
 
 
-def signed_yaw(face: DetectedFace) -> float:
-    """Head yaw in [-1, 1]. Positive means the nose sits toward IMAGE-right.
-
-    The quality gate's `yaw_symmetry` deliberately discards direction, since it
-    only cares how far from frontal a face is. A challenge has to know which way
-    the head turned, so the signed form is computed here rather than widening
-    that metric and disturbing its tested behaviour.
-    """
-    landmarks = face.landmarks
-    to_left_eye = float(landmarks[LM_NOSE][0] - landmarks[LM_EYE_LEFT][0])
-    to_right_eye = float(landmarks[LM_EYE_RIGHT][0] - landmarks[LM_NOSE][0])
-    span = to_left_eye + to_right_eye
-    if abs(span) < 1e-6:
-        return 0.0
-    return max(-1.0, min(1.0, (to_left_eye - to_right_eye) / span))
+DEFAULT_PRESENCE_THRESHOLDS = PresenceThresholds()
 
 
 @dataclass(frozen=True, slots=True)
-class PoseSample:
-    """What one frame contributes to a liveness judgement."""
+class PresenceSample:
+    """What one frame contributes to a presence judgement."""
 
-    yaw: float
-    # Bounding-box area in PIXELS, not a fraction of the frame. Within a single
-    # session the camera resolution does not change, so comparing pixel area
-    # against the baseline is exactly equivalent to comparing ratios — and it
-    # removes any need to thread frame dimensions through the pipeline.
-    face_area: float
+    # The pipeline's whole verdict for the frame: a face was found, the
+    # selection policy resolved it, and it passed quality. Deliberately not
+    # re-derived from individual metrics here — one gate, one place.
+    usable: bool
     score: float
+    # None when the eyes could not be measured at all (face too small, patch off
+    # the edge of the frame). Distinct from a low value, which means measured
+    # and closed.
+    openness: float | None = None
+    # Face-wide sharpness, used only to decide whether `openness` is trustworthy
+    # this frame. Never a pass/fail input in its own right — the quality gate
+    # already owns that judgement.
+    sharpness: float | None = None
 
-    @property
-    def is_neutral(self) -> bool:
-        return abs(self.yaw) <= DEFAULT_LIVENESS_THRESHOLDS.yaw_neutral
+
+def _eye_patch_spread(
+    gray: np.ndarray, centre: np.ndarray, half_width: int, half_height: int
+) -> float | None:
+    """Normalised intensity spread of one eye patch, or None if unmeasurable."""
+    height, width = gray.shape[:2]
+    x, y = round(float(centre[0])), round(float(centre[1]))
+    left, right = max(0, x - half_width), min(width, x + half_width + 1)
+    top, bottom = max(0, y - half_height), min(height, y + half_height + 1)
+    # A patch clipped to nothing is off the edge of the frame entirely.
+    if right - left < 3 or bottom - top < 3:
+        return None
+
+    patch = gray[top:bottom, left:right]
+    mean = float(patch.mean())
+    # Dividing by the patch's own mean is what makes this comparable between a
+    # brightly and a dimly lit face. A near-black patch has no usable ratio.
+    if mean < 1.0:
+        return None
+    return float(patch.std()) / mean
 
 
-def sample_pose(analysis: ImageAnalysis) -> PoseSample | None:
-    """Extract pose from an analysed frame, or None if there is no usable face.
+def face_sharpness(gray: np.ndarray, face: DetectedFace) -> float | None:
+    """Laplacian energy over the face box, normalised for brightness.
 
-    Uses the detected face regardless of whether the QUALITY gate passed: a
-    liveness challenge asks the subject to turn away from frontal, which the
-    pose check is designed to reject. Gating liveness on quality would make the
-    challenge unpassable by construction.
+    Only ever compared against this session's own earlier frames. The absolute
+    value is as content-dependent as the quality gate's sharpness metric — which
+    is precisely why that one is documented as uncalibrated and effectively off.
+    """
+    height, width = gray.shape[:2]
+    bbox = face.bbox
+    left, right = max(0, bbox.x), min(width, bbox.right)
+    top, bottom = max(0, bbox.y), min(height, bbox.bottom)
+    if right - left < 3 or bottom - top < 3:
+        return None
+
+    patch = gray[top:bottom, left:right]
+    mean = float(patch.mean())
+    if mean < 1.0:
+        return None
+    # Squared because Laplacian variance scales with the square of contrast, so
+    # dividing by the mean once would leave brightness in the answer.
+    return float(cv2.Laplacian(patch, cv2.CV_64F).var()) / (mean * mean)
+
+
+def eye_openness(gray: np.ndarray, face: DetectedFace) -> float | None:
+    """How open both eyes look, in arbitrary units meaningful only within a session.
+
+    Returns the MEAN of the two eyes: a natural blink closes both, and averaging
+    is steadier than either eye alone when one is partly turned away. The
+    consequence, stated so it is not discovered later, is that a deliberate
+    one-eyed wink produces roughly half the dip and may not register.
+    """
+    if face.interocular < MIN_INTEROCULAR_PX:
+        return None
+
+    half_width = max(3, round(face.interocular * EYE_PATCH_WIDTH_SCALE))
+    half_height = max(2, round(face.interocular * EYE_PATCH_HEIGHT_SCALE))
+    spreads = [
+        _eye_patch_spread(gray, face.landmarks[index], half_width, half_height)
+        for index in (LM_EYE_LEFT, LM_EYE_RIGHT)
+    ]
+    measured = [value for value in spreads if value is not None]
+    # Both eyes or nothing: one eye alone changes what the number means, and a
+    # baseline built from two eyes cannot be compared against one.
+    if len(measured) < 2:
+        return None
+    return sum(measured) / len(measured)
+
+
+def sample_presence(analysis: ImageAnalysis, image_bgr: np.ndarray) -> PresenceSample | None:
+    """Extract presence from an analysed frame, or None if no face was found.
+
+    "No face" and "found but unusable" are different events and the state
+    machine treats them differently: a frame with no face at all is a missing
+    observation — a camera warming up, someone glancing away — while a face that
+    fails quality is a real observation that simply does not count towards the
+    run.
     """
     face = analysis.face
-    if face is None or face.bbox.area <= 0:
+    if face is None:
         return None
-    return PoseSample(
-        yaw=signed_yaw(face),
-        face_area=float(face.bbox.area),
+    # One conversion feeding both measurements: this runs on every frame of a
+    # live socket, so a second pass over the same pixels is not free.
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    return PresenceSample(
+        usable=analysis.ok,
         score=face.score,
+        openness=eye_openness(gray, face),
+        sharpness=face_sharpness(gray, face),
     )
 
 
-def satisfies(
-    challenge: ChallengeKind,
-    sample: PoseSample,
+def counts_towards_hold(
+    sample: PresenceSample,
     *,
-    baseline_area: float | None = None,
-    thresholds: LivenessThresholds = DEFAULT_LIVENESS_THRESHOLDS,
+    thresholds: PresenceThresholds = DEFAULT_PRESENCE_THRESHOLDS,
 ) -> bool:
-    """Has this frame met the challenge?
-
-    `baseline_area` is the face size when the challenge was issued, which
-    MOVE_CLOSER is measured against.
-    """
-    if sample.score < thresholds.min_detection_score:
-        return False
-
-    if challenge is ChallengeKind.MOVE_CLOSER:
-        if baseline_area is None or baseline_area <= 0:
-            return False
-        return sample.face_area >= baseline_area * thresholds.closer_growth
-
-    sign = _YAW_SIGN[challenge]
-    return sample.yaw * sign >= thresholds.yaw_target
-
-
-def random_sequence(length: int = 3) -> tuple[ChallengeKind, ...]:
-    """A randomised challenge order, drawn per session.
-
-    Randomising is what makes a recorded video replay costly: the attacker would
-    need footage of the right movements in the right order. `secrets` rather than
-    `random` because a predictable sequence is exactly what defeats the point.
-    """
-    if length < 1:
-        raise ValueError("a liveness sequence needs at least one challenge")
-
-    sequence: list[ChallengeKind] = []
-    previous: ChallengeKind | None = None
-    for index in range(length):
-        # Never repeat back-to-back: two identical challenges in a row can be
-        # satisfied by holding one pose across both.
-        choices = [c for c in ChallengeKind if c is not previous]
-        # Always finish on a pose challenge; MOVE_CLOSER as the last step leaves
-        # the subject too close for a good capture frame.
-        if index == length - 1:
-            choices = [c for c in choices if c in POSE_CHALLENGES]
-        chosen = choices[secrets.randbelow(len(choices))]
-        sequence.append(chosen)
-        previous = chosen
-    return tuple(sequence)
+    """Does this frame extend the run?"""
+    return sample.usable and sample.score >= thresholds.min_detection_score
