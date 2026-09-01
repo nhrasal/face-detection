@@ -63,6 +63,11 @@ def test_create_and_get_user_reencodes_profile_under_generated_name(
     assert fetched.status_code == 200
     assert fetched.json() == body
 
+    profile = client.get(f"/api/v1/users/{body['id']}/profile-image")
+    assert profile.status_code == 200
+    assert profile.headers["content-type"] == "image/jpeg"
+    assert profile.content.startswith(b"\xff\xd8\xff")
+
 
 def test_duplicate_external_id_is_a_conflict_and_leaves_one_file(
     phase8_client: tuple[TestClient, Path],

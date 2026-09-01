@@ -4,7 +4,7 @@ import time
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from slowapi import Limiter
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -81,6 +81,16 @@ def create_users_router(settings: Settings, limiter: Limiter) -> APIRouter:
     @router.get("/{user_id}", response_model=UserResponse)
     def get_user(user_id: uuid.UUID, session: DbSession) -> User:
         return _get_user(session, user_id)
+
+    @router.get(
+        "/{user_id}/profile-image",
+        response_class=Response,
+        responses={200: {"content": {"image/jpeg": {}}}},
+    )
+    def get_profile_image(request: Request, user_id: uuid.UUID, session: DbSession) -> Response:
+        user = _get_user(session, user_id)
+        store: ProfileImageStore = request.app.state.profile_store
+        return Response(content=store.read(user.profile_image_url), media_type="image/jpeg")
 
     @router.put("/{user_id}/profile-image", response_model=UserResponse)
     def replace_profile_image(
