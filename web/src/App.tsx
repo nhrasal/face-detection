@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Alert } from "@components/Alert";
 import { AppHeader } from "@components/AppHeader";
+import { Card } from "@components/Card";
 import { PortraitComparison } from "@components/PortraitComparison";
 import { MIN_QUERY_LENGTH, ProfileLookup } from "@components/ProfileLookup";
-import { ProfileSection, type ProfileMode } from "@components/ProfileSection";
+import { ProfileModeTabs, type ProfileMode } from "@components/ProfileModeTabs";
+import { SelectedProfile, SelectedProfileActions } from "@components/SelectedProfile";
 import { UserRegistration } from "@components/UserRegistration";
 import { PwaUpdatePrompt } from "@components/PwaUpdatePrompt";
 import { VerificationResult as ResultPanel } from "@components/VerificationResult";
@@ -25,6 +28,7 @@ function App() {
   const lookupRef = useRef<AbortController | null>(null);
   const verifyRef = useRef<AbortController | null>(null);
   const createRef = useRef<AbortController | null>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
 
   // Abort whatever is in flight so a late response can never paint over a newer one.
   useEffect(() => () => {
@@ -32,6 +36,15 @@ function App() {
     verifyRef.current?.abort();
     createRef.current?.abort();
   }, []);
+
+  // The result is the reason the operator is here, and on a short viewport it
+  // lands below the fold. Bring it into view rather than leaving them to wonder
+  // whether the verification ran at all.
+  useEffect(() => {
+    if (!result) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    resultRef.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "nearest" });
+  }, [result]);
 
   // Every path that puts a different profile on screen invalidates the pending work
   // of the previous one, so they all clear the same state.
@@ -101,14 +114,13 @@ function App() {
     setError(candidate.select(file));
   };
 
-  // A live capture has already been through the check the server ran on the
-  // preview, so the operator has watched it confirm the frame in real time.
-  // Making them press Verify afterwards asks for a second opinion on something
-  // they just saw decided, so the camera paths go straight through.
+  // The liveness path alone verifies without a further click: its capture is the
+  // completion of a challenge the server ran and passed, so the frame is already
+  // decided by the time it lands and asking for Verify would only re-ask.
   //
-  // Deliberately NOT extended to the file picker: every verification writes an
-  // audit row, and auto-firing on each pick would record an attempt for a file
-  // chosen by mistake.
+  // Deliberately NOT used by the file picker or the plain camera: every
+  // verification writes an audit row, and firing on each pick or shutter press
+  // would record an attempt for a shot the operator has not reviewed.
   const captureAndVerify = (file: File) => {
     setResult(null);
     const problem = candidate.select(file);
@@ -139,24 +151,85 @@ function App() {
 
   const resetCandidate = () => { candidate.reset(); setResult(null); setError(null); };
 
-  return <main className="mx-auto min-h-screen w-[min(1180px,calc(100%-24px))] pb-8 text-emerald-950 sm:w-[min(1180px,calc(100%-40px))]">
-    <AppHeader />
-    <section className="max-w-3xl py-12 md:py-18" aria-labelledby="page-title">
-      <p className="mb-3 text-xs font-bold uppercase tracking-[.16em] text-emerald-700">Photo verification</p>
-      <h1 id="page-title" className="mb-6 font-serif text-5xl leading-[.92] tracking-[-.045em] sm:text-7xl md:text-8xl">Confirm a face.<br />Keep the decision explainable.</h1>
-      <p className="max-w-xl text-lg leading-relaxed text-stone-500">Load a registered profile, add one recent portrait, and receive an auditable result.</p>
-    </section>
-    <ProfileSection mode={mode} disabled={loadingUser || registering} onModeChange={changeMode}>
-      {mode === "lookup"
-        ? <ProfileLookup query={query} loading={loadingUser} results={results} onQueryChange={setQuery} onSearch={() => void searchUsers()} onSelect={selectUser} />
-        : <UserRegistration submitting={registering} onSubmit={(externalId, name, photo) => void registerUser(externalId, name, photo)} />}
-    </ProfileSection>
-    {error && <div className="mt-5 rounded-lg border-l-4 border-orange-600 bg-orange-50 p-4 text-orange-900" role="alert">{error}</div>}
-    {user && <PortraitComparison user={user} candidate={candidate.file} previewUrl={candidate.previewUrl} verifying={verifying} onSelect={chooseFile} onCapture={captureAndVerify} onReset={resetCandidate} onVerify={verify} />}
-    {result && <ResultPanel result={result} />}
-    <footer className="mt-14 flex flex-col justify-between gap-2 border-t border-stone-300 pt-5 text-xs text-stone-500 sm:flex-row"><span>Face Check · V1 photo verification</span><span>Scores and metadata only</span></footer>
-    <PwaUpdatePrompt />
-  </main>;
+  return (
+    <div className="min-h-screen bg-canvas text-ink">
+      <AppHeader />
+      <main className="mx-auto w-full max-w-5xl px-4 pb-16 sm:px-6">
+        <div className="py-6">
+          <h1 className="text-lg font-semibold tracking-tight">Verify identity</h1>
+          <p className="mt-0.5 text-sm text-ink-soft">
+            Compare a portrait against a registered profile. Scores and metadata only.
+          </p>
+        </div>
+
+        <div className="grid gap-4">
+          <Card
+            title="Profile"
+            actions={user
+              ? <SelectedProfileActions onChange={startNewProfile} />
+              : <ProfileModeTabs mode={mode} disabled={loadingUser || registering} onChange={changeMode} />}
+          >
+            {user ? (
+              <SelectedProfile user={user} />
+            ) : mode === "lookup" ? (
+              <ProfileLookup
+                query={query}
+                loading={loadingUser}
+                results={results}
+                onQueryChange={setQuery}
+                onSearch={() => void searchUsers()}
+                onSelect={selectUser}
+              />
+            ) : (
+              <UserRegistration
+                submitting={registering}
+                onSubmit={(externalId, name, photo) => void registerUser(externalId, name, photo)}
+              />
+            )}
+          </Card>
+
+          {error && <Alert>{error}</Alert>}
+
+          {user && (
+            <Card title="Comparison">
+              <PortraitComparison
+                user={user}
+                candidate={candidate.file}
+                previewUrl={candidate.previewUrl}
+                verifying={verifying}
+                result={result}
+                onSelect={chooseFile}
+                onCapture={captureAndVerify}
+                onReset={resetCandidate}
+                onVerify={verify}
+              />
+            </Card>
+          )}
+
+          {(result || verifying) && (
+            <div ref={resultRef}>
+              <Card title="Result">
+                {result ? (
+                  <ResultPanel result={result} />
+                ) : (
+                  <p className="flex items-center gap-2 text-sm text-ink-soft" role="status">
+                    <span className="size-3 animate-spin rounded-full border-2 border-line-strong border-t-accent" aria-hidden="true" />
+                    Comparing faces…
+                  </p>
+                )}
+              </Card>
+            </div>
+          )}
+        </div>
+
+        <footer className="mt-10 flex flex-col justify-between gap-1.5 border-t border-line pt-4 text-xs text-ink-muted sm:flex-row">
+          <span>Face Check · V1 photo verification</span>
+          <span>Candidate photographs are not stored</span>
+        </footer>
+      </main>
+      <PwaUpdatePrompt />
+    </div>
+  );
 }
 
 export default App;

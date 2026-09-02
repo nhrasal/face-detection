@@ -12,14 +12,18 @@ interface Props {
 
 export const MIN_QUERY_LENGTH = 2;
 
+const SKELETON_ROWS = 3;
+
 export function ProfileLookup({ query, loading, results, onQueryChange, onSearch, onSelect }: Props) {
   return (
     <div>
-      <label className="mb-2 block text-xs text-emerald-100/70" htmlFor="user-search">External ID or name</label>
+      <label className="mb-1.5 block text-xs font-medium text-ink-soft" htmlFor="user-search">
+        External ID or name
+      </label>
       <div className="flex flex-col gap-2 sm:flex-row">
         <input
           id="user-search"
-          className="min-w-0 flex-1 rounded-xl border border-emerald-700 bg-emerald-900 px-4 py-3 text-white outline-none placeholder:text-emerald-200/40 focus:border-lime-200 focus:ring-4 focus:ring-lime-200/10"
+          className="min-w-0 flex-1 rounded-md border border-line bg-sunken px-3 py-2 text-sm text-ink outline-none transition-shadow placeholder:text-ink-muted focus:border-accent focus:ring-2 focus:ring-accent/25"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => event.key === "Enter" && onSearch()}
@@ -28,7 +32,7 @@ export function ProfileLookup({ query, loading, results, onQueryChange, onSearch
           spellCheck={false}
         />
         <button
-          className="rounded-xl bg-lime-200 px-5 py-3 font-bold text-emerald-950 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-canvas transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-40"
           onClick={onSearch}
           disabled={loading}
         >
@@ -36,32 +40,56 @@ export function ProfileLookup({ query, loading, results, onQueryChange, onSearch
         </button>
       </div>
 
-      {results !== null && (
+      {/* A skeleton rather than a spinner: the rows land in the same place they
+          were sketched, so the list does not jump as the response arrives. */}
+      {loading && (
+        <ul className="mt-3 divide-y divide-line overflow-hidden rounded-md border border-line" aria-hidden="true">
+          {Array.from({ length: SKELETON_ROWS }, (_, index) => (
+            <li key={index} className="flex items-center gap-3 p-2.5">
+              <span className="size-9 shrink-0 animate-pulse rounded-md bg-sunken" />
+              <span className="min-w-0 flex-1 space-y-1.5">
+                <span className="block h-3 w-32 animate-pulse rounded bg-sunken" />
+                <span className="block h-2.5 w-20 animate-pulse rounded bg-sunken" />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!loading && results !== null && (
         results.length === 0 ? (
-          <p className="mt-4 text-sm text-emerald-200/60">No profile matches that external ID or name.</p>
+          <p className="mt-3 rounded-md border border-dashed border-line-strong px-3 py-4 text-center text-sm text-ink-soft" role="status">
+            No profile matches that external ID or name.
+          </p>
         ) : (
-          <ul className="mt-4 max-h-72 divide-y divide-emerald-800 overflow-y-auto rounded-xl border border-emerald-800" role="list">
-            {results.map((user) => (
-              <li key={user.id}>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-3 p-3 text-left hover:bg-emerald-900"
-                  onClick={() => onSelect(user)}
-                >
-                  <img
-                    className="size-11 shrink-0 rounded-lg bg-emerald-900 object-cover"
-                    src={FaceService.profileImageUrl(user.id)}
-                    alt=""
-                    loading="lazy"
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate font-bold">{user.name}</span>
-                    <span className="block truncate text-xs text-emerald-200/60">{user.external_id}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            <p className="mt-4 mb-1.5 text-xs font-medium text-ink-soft" role="status">
+              {results.length} {results.length === 1 ? "profile" : "profiles"} found
+            </p>
+            <ul className="max-h-72 divide-y divide-line overflow-y-auto rounded-md border border-line" role="list">
+              {results.map((user) => (
+                <li key={user.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 p-2.5 text-left transition-colors hover:bg-line/60"
+                    onClick={() => onSelect(user)}
+                  >
+                    <img
+                      className="size-9 shrink-0 rounded-md border border-line bg-sunken object-cover"
+                      src={FaceService.profileImageUrl(user.id)}
+                      alt=""
+                      loading="lazy"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-ink">{user.name}</span>
+                      <span className="block truncate font-mono text-xs text-ink-soft">{user.external_id}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-ink-muted" aria-hidden="true">Select →</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )
       )}
     </div>

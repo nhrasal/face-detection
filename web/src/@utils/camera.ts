@@ -5,22 +5,19 @@ import { issueMessages } from "@utils/verification";
 export const FRAME_MAX_SIDE = 640;
 export const FRAME_QUALITY = 0.7;
 
+/**
+ * The shape of a capture: portrait, matching the portrait slots either side of
+ * the comparison. The viewfinder, the encoded still and the preview all use it,
+ * so the frame the operator composes is the frame that gets verified.
+ */
+export const CAPTURE_ASPECT = 4 / 5;
+
 /** The still that is actually verified keeps enough detail for the recogniser. */
 export const CAPTURE_MAX_SIDE = 1280;
 export const CAPTURE_QUALITY = 0.92;
 
 /** Roughly 2.5 FPS — the HTTP fallback stays inside the roadmap's 2-5 FPS band. */
 export const FRAME_INTERVAL_MS = 400;
-
-/**
- * How long a frame must stay good before it is captured automatically.
- *
- * `stabiliseGuidance` already suppresses single-frame flicker, but three frames
- * is under a tenth of a second at full rate — quick enough to snap someone who
- * is still settling into position. This dwell is for the person, not the
- * detector: long enough to feel deliberate, short enough not to feel stuck.
- */
-export const AUTO_CAPTURE_HOLD_MS = 800;
 
 /**
  * Ceiling for the live stream: 30 FPS.
@@ -46,6 +43,21 @@ export function scaleToFit(width: number, height: number, maxSide: number): Fram
 }
 
 /**
+ * The part of a source frame visible inside a box of `aspect`, fitted like
+ * `object-cover`: the overflowing dimension is cropped evenly at both ends.
+ * Without an aspect the whole frame is visible.
+ */
+export function visibleRegion(width: number, height: number, aspect?: number) {
+  if (!aspect || width <= 0 || height <= 0) return { x: 0, y: 0, width, height };
+  if (width / height > aspect) {
+    const visible = height * aspect;
+    return { x: (width - visible) / 2, y: 0, width: visible, height };
+  }
+  const visible = width / aspect;
+  return { x: 0, y: (height - visible) / 2, width, height: visible };
+}
+
+/**
  * Encode the video's current frame as a JPEG.
  *
  * Returns null while the camera is still negotiating a resolution — `videoWidth`
@@ -55,17 +67,22 @@ export async function grabFrame(
   video: HTMLVideoElement,
   maxSide: number,
   quality: number,
+  aspect?: number,
 ): Promise<{ blob: Blob; width: number; height: number } | null> {
   if (!video.videoWidth || !video.videoHeight) return null;
-  const { width, height } = scaleToFit(video.videoWidth, video.videoHeight, maxSide);
+  // Encode only what the viewfinder showed. Capturing the full sensor frame
+  // would hand back an image the operator never composed.
+  const source = visibleRegion(video.videoWidth, video.videoHeight, aspect);
+  const { width, height } = scaleToFit(source.width, source.height, maxSide);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) return null;
-  // The raw video, never the mirrored preview: mirroring is a comfort affordance
-  // for the operator, not something that belongs in a stored or verified image.
-  context.drawImage(video, 0, 0, width, height);
+  // The raw video. A verified or stored portrait must be the true view — text
+  // on a badge or lanyard has to read the right way round — so the preview is
+  // shown unmirrored to match rather than the capture being flipped to match it.
+  context.drawImage(video, source.x, source.y, source.width, source.height, 0, 0, width, height);
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, "image/jpeg", quality),
   );
@@ -94,18 +111,28 @@ export function overlayBox(
   box: BoundingBox,
   frame: FrameSize,
   mirrored: boolean,
+  displayAspect?: number,
 ): OverlayBox | null {
   if (frame.width <= 0 || frame.height <= 0) return null;
+  // The detector measures the whole frame, but the viewfinder may be showing a
+  // cropped part of it. Percentages have to be of what is on screen, or the box
+  // drifts away from the face it is tracking.
+  const view = visibleRegion(frame.width, frame.height, displayAspect);
+  if (view.width <= 0 || view.height <= 0) return null;
   const clamp = (value: number) => Math.min(100, Math.max(0, value));
   const left = mirrored ? frame.width - (box.x + box.width) : box.x;
-  const leftPercent = clamp((left / frame.width) * 100);
-  const topPercent = clamp((box.y / frame.height) * 100);
+  // Clip against the visible rect in pixels before converting to percentages.
+  // Clamping the percentages instead measures the width from an edge that has
+  // already been moved, which gives a box outside the view a phantom width.
+  const x0 = Math.max(left, view.x);
+  const x1 = Math.min(left + box.width, view.x + view.width);
+  const y0 = Math.max(box.y, view.y);
+  const y1 = Math.min(box.y + box.height, view.y + view.height);
   return {
-    left: leftPercent,
-    top: topPercent,
-    // Detector boxes can run past the frame edge; clip rather than overflow.
-    width: clamp((box.width / frame.width) * 100 + leftPercent) - leftPercent,
-    height: clamp((box.height / frame.height) * 100 + topPercent) - topPercent,
+    left: clamp(((x0 - view.x) / view.width) * 100),
+    top: clamp(((y0 - view.y) / view.height) * 100),
+    width: (Math.max(0, x1 - x0) / view.width) * 100,
+    height: (Math.max(0, y1 - y0) / view.height) * 100,
   };
 }
 
@@ -141,10 +168,9 @@ export function frameGuidance(detection: LiveDetection | null): Guidance {
       ready: false,
     };
   }
-  // No instruction to capture: both camera panels take the photo themselves
-  // once this has held. Saying "ready to capture" would advertise a button that
-  // is not there.
-  return { message: "Hold still.", ready: true };
+  // Deliberately says nothing about a button: the camera panel has a shutter
+  // but the liveness panel does not, and both render this same message.
+  return { message: "Good frame.", ready: true };
 }
 
 export const INITIAL_GUIDANCE: Guidance = { message: "Looking for a face…", ready: false };

@@ -6,6 +6,7 @@ import {
   overlayBox,
   scaleToFit,
   stabiliseGuidance,
+  visibleRegion,
 } from "@utils/camera";
 
 const frame = { width: 640, height: 480 };
@@ -37,6 +38,25 @@ describe("scaleToFit", () => {
   });
 });
 
+describe("visibleRegion", () => {
+  it("crops the sides of a landscape frame shown in a portrait box", () => {
+    // 480 tall at 4:5 shows 384 of the 640 width, evenly trimmed at both ends.
+    expect(visibleRegion(640, 480, 0.8)).toEqual({ x: 128, y: 0, width: 384, height: 480 });
+  });
+
+  it("crops the top and bottom of a frame taller than the box", () => {
+    expect(visibleRegion(480, 640, 0.8)).toEqual({ x: 0, y: 20, width: 480, height: 600 });
+  });
+
+  it("shows the whole frame when no aspect is asked for", () => {
+    expect(visibleRegion(640, 480)).toEqual({ x: 0, y: 0, width: 640, height: 480 });
+  });
+
+  it("returns nothing to show for a frame with no size", () => {
+    expect(visibleRegion(0, 0, 0.8)).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+  });
+});
+
 describe("overlayBox", () => {
   const box = { x: 64, y: 48, width: 128, height: 96 };
 
@@ -56,6 +76,22 @@ describe("overlayBox", () => {
     expect((overhang?.left ?? 0) + (overhang?.width ?? 0)).toBeLessThanOrEqual(100);
   });
 
+  it("measures against the cropped view, not the frame the detector saw", () => {
+    // The viewfinder shows the middle 384px of a 640px frame, so a box at x=256
+    // sits a third of the way across what is actually on screen — not the fifth
+    // of the way it would be across the full frame.
+    const cropped = overlayBox({ x: 256, y: 48, width: 128, height: 96 }, frame, false, 0.8);
+    expect(cropped?.left).toBeCloseTo(33.33, 1);
+    expect(cropped?.width).toBeCloseTo(33.33, 1);
+    expect(cropped?.top).toBeCloseTo(10);
+  });
+
+  it("clips a box that falls outside the cropped view", () => {
+    const offscreen = overlayBox({ x: 0, y: 48, width: 64, height: 96 }, frame, false, 0.8);
+    expect(offscreen?.left).toBe(0);
+    expect(offscreen?.width).toBe(0);
+  });
+
   it("returns nothing when the frame has no size", () => {
     expect(overlayBox(box, { width: 0, height: 0 }, false)).toBeNull();
   });
@@ -66,10 +102,10 @@ describe("frameGuidance", () => {
     expect(frameGuidance(null)).toEqual({ message: "Looking for a face…", ready: false });
   });
 
-  it("never advertises a shutter button, because there is not one", () => {
-    // Both camera panels capture themselves once `ready` has held. Telling the
-    // person to press something would send them looking for a control that was
-    // deliberately removed.
+  it("names no control, because only one of the two panels has one", () => {
+    // The camera panel has a shutter; the liveness panel captures itself on the
+    // blink. Both render this message, so it cannot mention pressing anything
+    // without sending liveness subjects looking for a button that is not there.
     expect(frameGuidance(detection()).message).not.toMatch(/capture|press|button|tap|click/i);
   });
 
