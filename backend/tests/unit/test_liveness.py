@@ -45,6 +45,11 @@ SHUT = PresenceSample(usable=True, score=0.95, openness=0.5, sharpness=1.0)
 BLURRED = PresenceSample(usable=True, score=0.95, openness=0.5, sharpness=0.05)
 
 
+def eye(openness: float) -> PresenceSample:
+    """A usable, sharp frame carrying one eye reading."""
+    return PresenceSample(usable=True, score=0.95, openness=openness, sharpness=1.0)
+
+
 def hold_then(session: LivenessSession, *samples: PresenceSample) -> None:
     """Complete the steady-face phase, then submit the given frames."""
     for _ in range(session.required_frames):
@@ -208,7 +213,7 @@ class TestBlinkDetection:
         assert not session.passed
 
     def test_the_baseline_follows_worsening_light(self) -> None:
-        """Peak-hold with decay, so a darkening room is not read as a blink."""
+        """A rolling median, so a darkening room is not read as a blink."""
         session = self.make(3)
         for _ in range(3):
             session.submit(OPEN, now=0.0)
@@ -222,6 +227,33 @@ class TestBlinkDetection:
                 now=0.0,
             )
         assert not session.blinked
+
+    def test_one_bright_frame_does_not_redefine_what_open_means(self) -> None:
+        """The reference is the middle of the open readings, not the best of them.
+
+        Under the old peak-hold this single 1.4 became the reference, and every
+        ordinary frame afterwards sat below 0.75 of it — so the check announced
+        a blink the subject never made.
+        """
+        session = self.make(3)
+        for value in (1.0, 1.0, 1.0, 1.4, 1.0, 0.95, 1.05, 1.0):
+            session.submit(eye(value), now=0.0)
+        assert not session.eyes_closed
+        assert not session.blinked
+
+    def test_a_real_blink_completes_against_a_noisy_open_signal(self) -> None:
+        """The other half of the same fault: blinks that stuck shut.
+
+        A peak-inflated reference put the reopen bar above what an ordinary open
+        eye reads, so a genuine blink closed and then never completed.
+        """
+        session = self.make(3)
+        for value in (0.95, 1.05, 1.0, 1.3, 0.98, 1.02):
+            session.submit(eye(value), now=0.0)
+        session.submit(eye(0.5), now=0.0)
+        assert session.eyes_closed, "a half-value dip is a closure by any reading"
+        session.submit(eye(0.98), now=0.0)
+        assert session.blinked, "an ordinary open frame must be enough to reopen"
 
     def test_a_broken_run_discards_the_baseline(self) -> None:
         """A new face in new light must not be judged against the old reference.
@@ -299,7 +331,8 @@ class TestSessionFailure:
     def test_the_blink_clock_starts_when_the_blink_is_asked_for(self) -> None:
         # Not at session creation: time spent finding the camera is not time
         # spent refusing to blink.
-        session = LivenessSession(id="t", required_frames=2, blink_timeout=5.0)
+        session = LivenessSession(id="t", required_frames=3, blink_timeout=5.0)
+        session.submit(OPEN, now=100.0)
         session.submit(OPEN, now=100.0)
         session.submit(OPEN, now=100.0)
         session.submit(SHUT, now=103.0)
@@ -339,7 +372,7 @@ class TestSessionFailure:
         assert session.created_at == 1234.0
 
     def test_a_few_missing_frames_are_tolerated(self) -> None:
-        session = LivenessSession(id="t", required_frames=2)
+        session = LivenessSession(id="t", required_frames=3)
         for _ in range(5):
             session.submit(None, now=1.0)
         assert not session.finished
@@ -370,7 +403,7 @@ class TestSessionFailure:
         assert not session.finished
 
     def test_a_finished_session_ignores_further_frames(self) -> None:
-        session = LivenessSession(id="t", required_frames=1)
+        session = LivenessSession(id="t", required_frames=3)
         hold_then(session, SHUT, OPEN)
         assert session.passed
         for _ in range(MAX_CONSECUTIVE_MISSING):

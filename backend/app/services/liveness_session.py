@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import secrets
 import time
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from enum import StrEnum
+from statistics import median
 
 from app.engine.liveness import (
     DEFAULT_PRESENCE_THRESHOLDS,
@@ -46,6 +48,17 @@ SKIP_TOLERANCE = 3
 # A face that stays gone for this many frames is someone who walked away, or a
 # photo being swapped for another photo.
 MAX_CONSECUTIVE_MISSING = 30
+
+# How many recent open-eye readings the baseline is drawn from. Roughly two
+# seconds at the rate the preview socket settles at, which is long enough to
+# average out frame noise and short enough to follow a subject walking into
+# different light.
+BASELINE_WINDOW = 30
+
+# The median of fewer readings than this is not a description of anything, so
+# no dip is judged against it. The hold phase runs for ten frames before a blink
+# is ever requested, so in practice the window is full long before it matters.
+MIN_BASELINE_SAMPLES = 3
 
 
 class SessionState(StrEnum):
@@ -80,14 +93,33 @@ class LivenessSession:
     held: int = 0
     state: SessionState = SessionState.AWAITING_FACE
     failure: FailureReason | None = None
-    # Peak eye openness seen, decayed slowly — the reference a blink is a dip
-    # below. None until the first measurable frame.
+    # The MEDIAN of recent open-eye readings — what open looks like for this
+    # face, in this light, right now. A blink is a dip below it.
+    #
+    # Median, not the peak it used to be. Peak-hold parks the reference at the
+    # TOP of the frame-to-frame noise band instead of its centre, and that
+    # breaks the check at both ends: closing at 0.75 of an inflated peak trips
+    # on ordinary noise, while reopening at 0.85 of it is a bar a genuinely open
+    # eye often cannot clear, so a real blink sticks in the closed state and
+    # never completes. Erratic in both directions, from one wrong statistic.
+    # Against a median the two ratios mean what their comments say they mean.
     baseline: float | None = None
-    # Peak face sharpness, same peak-hold-with-decay treatment. Eye readings are
-    # ignored when the current frame falls well below it — see `_observe_eyes`.
+    # The readings the median is taken over. Only frames judged open and sharp
+    # enough to trust are added, so a blink never pulls the reference down
+    # towards itself.
+    openness_window: deque[float] = field(default_factory=lambda: deque(maxlen=BASELINE_WINDOW))
+    # Peak face sharpness, kept as a peak-hold with decay. Peak is right here:
+    # the guard asks "has detail collapsed relative to the best this session has
+    # looked", which is a question about the best, not the typical.
     sharpness_baseline: float | None = None
     eyes_closed: bool = False
     blinked: bool = False
+    # Diagnostics only — the state machine never reads these. They exist because
+    # the one thing a still photograph cannot show is how this behaves on a real
+    # face at a real frame rate, so the live values go on the wire to be read
+    # off the running system. See `_eye_diagnostic` in the liveness route.
+    eye_trusted: bool = False
+    sharpness_ratio: float | None = None
     # Stamped on the FIRST submitted frame, from whatever clock that call used,
     # rather than defaulting to time.monotonic() here. Defaulting would mix a
     # real clock with an injected one and make every elapsed-time comparison
@@ -130,6 +162,7 @@ class LivenessSession:
         self.held = 0
         self.state = SessionState.AWAITING_FACE
         self.baseline = None
+        self.openness_window.clear()
         self.sharpness_baseline = None
         self.eyes_closed = False
         self.blink_armed_at = None
@@ -148,6 +181,13 @@ class LivenessSession:
                 else max(sharpness, self.sharpness_baseline * self.thresholds.baseline_decay)
             )
 
+        self.eye_trusted = False
+        self.sharpness_ratio = (
+            sharpness / self.sharpness_baseline
+            if sharpness is not None and self.sharpness_baseline
+            else None
+        )
+
         if openness is None:
             return
 
@@ -157,26 +197,33 @@ class LivenessSession:
             return
         if sharpness < self.sharpness_baseline * self.thresholds.min_sharpness_ratio:
             return
-
-        if self.baseline is None:
-            self.baseline = openness
-            return
+        self.eye_trusted = True
 
         if self.eyes_closed:
-            if openness >= self.baseline * self.thresholds.eyes_open_ratio:
+            if self.baseline is not None and openness >= (
+                self.baseline * self.thresholds.eyes_open_ratio
+            ):
                 # Closed, then open again: that is the blink.
                 self.eyes_closed = False
                 self.blinked = True
             return
 
-        if openness <= self.baseline * self.thresholds.eyes_closed_ratio:
+        # A dip is only meaningful against a reference built from enough
+        # readings to be one. Until then, frames only ever feed the window.
+        if (
+            self.baseline is not None
+            and len(self.openness_window) >= MIN_BASELINE_SAMPLES
+            and openness <= self.baseline * self.thresholds.eyes_closed_ratio
+        ):
             self.eyes_closed = True
             return
 
-        # Peak-hold with decay. max() so the reference is what OPEN looks like
-        # rather than an average dragged down by every blink; the decay so it
-        # can still follow someone moving into worse light.
-        self.baseline = max(openness, self.baseline * self.thresholds.baseline_decay)
+        # Open frames define the reference. Recorded before the median is taken
+        # so the newest reading counts towards the value it will be judged
+        # against next frame, and never while the eyes are closed — the branch
+        # above returns first — so a blink cannot drag the baseline to meet it.
+        self.openness_window.append(openness)
+        self.baseline = float(median(self.openness_window))
 
     def submit(self, sample: PresenceSample | None, *, now: float | None = None) -> None:
         """Advance the machine with one frame. `sample` is None when no face."""

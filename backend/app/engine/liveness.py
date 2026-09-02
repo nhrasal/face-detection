@@ -24,10 +24,11 @@ skin and the spread falls.
 
 The absolute value of that number means nothing across people, cameras and
 lighting, so it is never compared against a fixed bar. Each session builds its
-own baseline from the frames it has already seen and looks for a transient DIP
-below it. That is the same reasoning the rest of this codebase applies to
-thresholds: a relative measurement that calibrates itself beats an absolute one
-guessed in advance.
+own baseline from the frames it has already seen — the MEDIAN of recent open
+readings, so the reference describes a typical open eye rather than the best
+frame luck supplied — and looks for a transient DIP below it. That is the same
+reasoning the rest of this codebase applies to thresholds: a relative
+measurement that calibrates itself beats an absolute one guessed in advance.
 
 THE FALSE-BLINK VECTOR, and the guard against it. Motion blur suppresses exactly
 the high-frequency eye detail this metric reads, so a blurred frame looks like a
@@ -114,16 +115,30 @@ class PresenceThresholds:
     eyes_open_ratio: float = 0.85
 
     # Eye readings are discarded below this fraction of the session's peak face
-    # sharpness. Sits in the wide gap measured between a blink (0.66 of baseline
-    # at worst) and a blurred frame (0.01), so it rejects the blur that would
-    # otherwise read as a blink without ever discarding a real one.
-    min_sharpness_ratio: float = 0.50
+    # sharpness, measured across the 11 test portraits:
+    #
+    #     shutting the eyes   0.822 - 1.018 of the open frame
+    #     blurring the frame  0.0008 - 0.0098 of the open frame
+    #
+    # An 84x gap, and the bar belongs in the middle of it rather than hugging
+    # one end. At 0.50 the worst blink cleared by only 1.64x — and the reference
+    # is a PEAK over noisy Laplacian variance, which sits above the typical
+    # frame, so that margin is spent before a subject blinks at all and the
+    # frame carrying the blink is thrown away as motion blur.
+    #
+    # 0.25 leaves a real blink 3.3x of headroom for peak inflation while still
+    # rejecting the worst blurred frame by 25x. Widened on the side that was
+    # costing detections, using the side that had margin to spare.
+    min_sharpness_ratio: float = 0.25
 
-    # The baseline tracks the peak openness seen, decayed slowly. Without decay
-    # a single bright frame would set an unreachable reference for the rest of
-    # the session; with it, the baseline follows someone walking into worse
-    # light. Slow enough that a blink lasting a dozen frames cannot drag the
-    # baseline down to meet itself.
+    # Decay on the SHARPNESS peak only. Without it a single crisp frame would
+    # set an unreachable reference and every later frame would be discarded as
+    # blurred; with it the guard follows a subject moving into worse light.
+    #
+    # The eye baseline does not use this: it is a rolling median of recent open
+    # readings, because a peak sits at the top of the noise band rather than its
+    # centre and made the check fire on noise while stalling on real blinks.
+    # See LivenessSession.baseline.
     baseline_decay: float = 0.99
 
 

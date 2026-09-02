@@ -17,6 +17,10 @@ export interface EyeReading {
   baseline: number | null;
   /** openness / baseline — what the closed threshold is compared against. */
   ratio: number | null;
+  /** Whether the blur guard let this reading through at all. */
+  trusted: boolean;
+  /** Face sharpness over the session peak — what `trusted` was decided on. */
+  sharpness_ratio: number | null;
 }
 
 export interface LivenessProgressMessage {

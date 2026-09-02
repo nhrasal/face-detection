@@ -71,6 +71,14 @@ def _eye_diagnostic(
         "ratio": round(sample.openness / baseline, 4)
         if baseline is not None and baseline > 0
         else None,
+        # Whether the blur guard let this reading through, and the ratio that
+        # decided. A blink that is never seen is either a dip that did not reach
+        # the bar or a frame discarded before it was measured, and without these
+        # two fields those look identical from outside.
+        "trusted": session.eye_trusted,
+        "sharpness_ratio": round(session.sharpness_ratio, 4)
+        if session.sharpness_ratio is not None
+        else None,
     }
 
 
