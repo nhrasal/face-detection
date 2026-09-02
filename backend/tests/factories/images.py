@@ -130,3 +130,51 @@ def structured_array(width: int = 640, height: int = 480, seed: int = 1) -> np.n
         colour = tuple(int(v) for v in rng.integers(20, 235, 3))
         cv2.ellipse(img, centre, axes, float(rng.integers(0, 180)), 0, 360, colour, -1)
     return img
+
+
+# A mid skin tone, a surgical-mask blue and a dark lens, chosen so the first
+# lands inside the Cr/Cb skin locus in app/engine/occlusion.py and the other
+# two land well outside it.
+SKIN_BGR = (110, 150, 200)
+MASK_BGR = (180, 130, 60)
+LENS_BGR = (18, 18, 18)
+
+
+def skin_face_array(
+    width: int = 640,
+    height: int = 480,
+    *,
+    bbox: tuple[int, int, int, int] = (100, 80, 120, 120),
+    seed: int = 3,
+) -> np.ndarray:
+    """A skin-toned, lightly textured face patch on a neutral ground.
+
+    Not a face — just a region whose chroma reads as skin, which is all the
+    occlusion check looks at.
+    """
+    rng = np.random.default_rng(seed)
+    image = np.full((height, width, 3), 90, dtype=np.uint8)
+    x, y, w, h = bbox
+    patch = np.full((h, w, 3), SKIN_BGR, dtype=np.int16)
+    patch += rng.integers(-12, 13, (h, w, 3), dtype=np.int16)
+    image[y : y + h, x : x + w] = np.clip(patch, 0, 255).astype(np.uint8)
+    return image
+
+
+def paint_band(
+    image: np.ndarray,
+    centre: np.ndarray,
+    width: float,
+    height: float,
+    colour_bgr: tuple[int, int, int],
+) -> None:
+    """Fill an axis-aligned band in place, mirroring `occlusion._region`."""
+    frame_h, frame_w = image.shape[:2]
+    # float() first: round() on a numpy scalar returns a numpy scalar, which is
+    # not a valid slice index.
+    cx, cy = float(centre[0]), float(centre[1])
+    x0 = max(0, round(cx - width / 2.0))
+    x1 = min(frame_w, round(cx + width / 2.0))
+    y0 = max(0, round(cy - height / 2.0))
+    y1 = min(frame_h, round(cy + height / 2.0))
+    image[y0:y1, x0:x1] = colour_bgr

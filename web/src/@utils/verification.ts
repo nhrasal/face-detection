@@ -23,6 +23,10 @@ export const issueMessages: Record<string, string> = {
   FACE_FILLS_FRAME: "Move slightly farther away so your full face is visible.",
   FACE_OUT_OF_FRAME: "Center your full face inside the photograph.",
   LOW_DETECTION_CONFIDENCE: "Use a clearer, front-facing photograph.",
+  // Occlusion. Worded as the single action that clears it, because these are
+  // the messages the live viewfinder shows while someone is standing there.
+  FACE_COVERED: "Remove anything covering your face — a mask, scarf, or hand.",
+  EYES_COVERED: "Remove sunglasses or anything covering your eyes.",
 };
 
 const decisionCopy: Record<Decision, { title: string; detail: string; tone: string }> = {

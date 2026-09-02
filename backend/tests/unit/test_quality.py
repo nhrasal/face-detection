@@ -7,8 +7,21 @@ import numpy as np
 import pytest
 
 from app.engine.quality import DEFAULT_THRESHOLDS, QualityThresholds, assess_quality
-from app.engine.types import BoundingBox, DetectedFace, ReasonCode
-from tests.factories.images import make_face, structured_array, textured_array
+from app.engine.types import (
+    LM_MOUTH_LEFT,
+    LM_MOUTH_RIGHT,
+    BoundingBox,
+    DetectedFace,
+    ReasonCode,
+)
+from tests.factories.images import (
+    MASK_BGR,
+    make_face,
+    paint_band,
+    skin_face_array,
+    structured_array,
+    textured_array,
+)
 
 GOOD_BBOX = (100, 80, 160, 160)
 
@@ -46,7 +59,33 @@ class TestPassingCase:
             "roll_degrees",
             "face_area_ratio",
             "contained",
+            # Folded in from the occlusion check, which records on every
+            # assessment for the same calibration reason.
+            "eye_skin_ratio",
+            "mouth_skin_ratio",
+            "eye_texture",
+            "mouth_texture",
         }
+
+
+class TestOcclusion:
+    """The gate surfaces occlusion findings; occlusion.py owns the judgement."""
+
+    def test_a_covered_lower_face_reaches_the_quality_issues(self) -> None:
+        face = make_face(bbox=GOOD_BBOX)
+        image = skin_face_array(bbox=GOOD_BBOX)
+        mouth = (face.landmarks[LM_MOUTH_LEFT] + face.landmarks[LM_MOUTH_RIGHT]) / 2.0
+        paint_band(image, mouth, face.interocular * 1.8, face.interocular * 0.6, MASK_BGR)
+        report = assess_quality(image, face)
+        assert ReasonCode.FACE_COVERED in report.issues
+        assert not report.passed
+
+    def test_a_noisy_image_raises_no_occlusion_finding(self) -> None:
+        # The existing passing case must stay passing: random noise has no skin
+        # reference, so the check fails open rather than inventing a covering.
+        report = assess_quality(good_image(), make_face(bbox=GOOD_BBOX))
+        assert ReasonCode.FACE_COVERED not in report.issues
+        assert ReasonCode.EYES_COVERED not in report.issues
 
 
 class TestFaceSize:

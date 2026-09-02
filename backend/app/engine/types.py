@@ -38,6 +38,10 @@ class ReasonCode(StrEnum):
     FACE_TOO_SMALL_IN_FRAME = "FACE_TOO_SMALL_IN_FRAME"
     FACE_FILLS_FRAME = "FACE_FILLS_FRAME"
     FACE_OUT_OF_FRAME = "FACE_OUT_OF_FRAME"
+    # Something is in front of the face. See app/engine/occlusion.py for what
+    # these can and cannot see — notably, a bare hand is skin and slips through.
+    FACE_COVERED = "FACE_COVERED"
+    EYES_COVERED = "EYES_COVERED"
 
 
 @dataclass(frozen=True, slots=True)

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from app.engine.occlusion import DEFAULT_OCCLUSION, OcclusionThresholds, assess_occlusion
 from app.engine.types import (
     LM_EYE_LEFT,
     LM_EYE_RIGHT,
@@ -104,6 +105,7 @@ def assess_quality(
     image_bgr: np.ndarray,
     face: DetectedFace,
     thresholds: QualityThresholds = DEFAULT_THRESHOLDS,
+    occlusion_thresholds: OcclusionThresholds = DEFAULT_OCCLUSION,
 ) -> QualityReport:
     height, width = image_bgr.shape[:2]
     bbox = face.bbox
@@ -172,10 +174,21 @@ def assess_quality(
         bbox.x >= -m and bbox.y >= -m and bbox.right <= width + m and bbox.bottom <= height + m
     )
 
+    # Occlusion is judged on the full image, not the padded crop: its bands are
+    # positioned from landmarks in image coordinates.
+    occlusion = assess_occlusion(image_bgr, face, occlusion_thresholds)
+
     if face_px < thresholds.min_face_px or interocular < thresholds.min_interocular_px:
         issues.append(ReasonCode.FACE_TOO_SMALL)
     if detection_score < thresholds.min_detection_score:
         issues.append(ReasonCode.LOW_DETECTION_CONFIDENCE)
+    # Reported here, ahead of the pixel measurements, because the live guidance
+    # speaks only the FIRST issue. A covering is the most actionable thing a
+    # subject can be told, and it is upstream of the numbers it distorts —
+    # a mask flattens contrast and a lens darkens the frame. But it comes after
+    # the two checks above: the bands are sized in interocular units, so a face
+    # too small or too uncertain to measure has nothing worth sampling.
+    issues.extend(occlusion.issues)
     if sharpness < thresholds.min_sharpness:
         issues.append(ReasonCode.IMAGE_BLURRY)
     if brightness < thresholds.min_brightness:
@@ -228,5 +241,8 @@ def assess_quality(
             "roll_degrees": round(roll_degrees, 2),
             "face_area_ratio": round(face_area_ratio, 5),
             "contained": float(contained),
+            # Occlusion is a categorical finding, so like `contained` it stays
+            # out of `sub_scores` above and only appears in `issues`.
+            **occlusion.metrics,
         },
     )
