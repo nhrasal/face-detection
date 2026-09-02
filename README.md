@@ -73,8 +73,8 @@ One-time setup:
 ```bash
 python3.13 -m venv backend/.venv
 backend/.venv/bin/pip install -r backend/requirements-dev.txt
-cp .env.example backend/.env
-./scripts/download_models.sh
+cp backend/.env.example backend/.env
+backend/scripts/download_models.sh
 ```
 
 Then, for everything:
@@ -279,16 +279,16 @@ other two produces `module compiled against API version 0x10` crashes at import.
 ## Models
 
 ```bash
-./scripts/download_models.sh            # fetch + verify the default pair
-./scripts/download_models.sh --verify   # check what is on disk, fetch nothing
-./scripts/download_models.sh --record   # regenerate the checksum manifest
+backend/scripts/download_models.sh            # fetch + verify the default pair
+backend/scripts/download_models.sh --verify   # check what is on disk, fetch nothing
+backend/scripts/download_models.sh --record   # regenerate the checksum manifest
 ```
 
-Weights are checksum-pinned in `scripts/models.sha256` and the script fails closed
+Weights are checksum-pinned in `backend/scripts/models.sha256` and the script fails closed
 on any mismatch — model weights are executable inputs that decide who gets verified
 as whom. The opencv_zoo source is pinned to a **commit**, not a branch: "version
 every model" means nothing if the bytes behind the name `2023mar` can change
-underneath you. Weights are never committed (`models/*` is ignored).
+underneath you. Weights are never committed (`backend/models/*` is ignored).
 
 | | bytes | licence |
 |---|---|---|

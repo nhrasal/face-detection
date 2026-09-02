@@ -13,8 +13,8 @@ sorted out later.
 Downloads land in backend/tests/assets/, which is gitignored. Face photos must
 never enter git history.
 
-    python scripts/fetch_test_faces.py
-    python scripts/fetch_test_faces.py --verify   # check what is on disk
+    python backend/scripts/fetch_test_faces.py
+    python backend/scripts/fetch_test_faces.py --verify   # check what is on disk
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ API = "https://commons.wikimedia.org/w/api.php"
 USER_AGENT = "face-detection-dev/0.1 (test asset fetch; contact: local development)"
 THUMB_WIDTH = 900
 
-ROOT = Path(__file__).resolve().parent.parent
-ASSET_DIR = ROOT / "backend" / "tests" / "assets"
+BACKEND = Path(__file__).resolve().parent.parent
+ASSET_DIR = BACKEND / "tests" / "assets"
 
 # dest filename -> Commons "File:" title.
 #

@@ -2,8 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BACKEND_DIR="${PROJECT_DIR}/backend"
+BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PYTHON_BIN="${BACKEND_DIR}/.venv/bin/python"
 ALEMBIC_BIN="${BACKEND_DIR}/.venv/bin/alembic"
 
@@ -15,7 +14,7 @@ fi
 
 if [[ ! -f "${BACKEND_DIR}/.env" ]]; then
     echo "Backend environment file not found."
-    echo "Create it with: cp .env.example backend/.env"
+    echo "Create it with: cp backend/.env.example backend/.env"
     exit 1
 fi
 

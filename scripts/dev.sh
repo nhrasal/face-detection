@@ -14,7 +14,7 @@ fail() { echo "error: $*" >&2; exit 1; }
 [[ -x "${VENV}/bin/python" ]] || fail "backend/.venv is missing. Create it with:
   python3.13 -m venv backend/.venv && backend/.venv/bin/pip install -r backend/requirements-dev.txt"
 [[ -f "${BACKEND_DIR}/.env" ]] || fail "backend/.env is missing. Create it with:
-  cp .env.example backend/.env"
+  cp backend/.env.example backend/.env"
 
 if [[ ! -d "${WEB_DIR}/node_modules" ]]; then
   echo "==> installing web dependencies"
@@ -34,7 +34,7 @@ trap shutdown INT TERM EXIT
 # Create the database named in DATABASE_URL if the server does not have it yet,
 # so a clean checkout needs nothing but a running PostgreSQL.
 echo "==> checking database"
-if ! "${VENV}/bin/python" "${SCRIPT_DIR}/ensure_database.py" 2>"${LOG_DIR}/db.log"; then
+if ! "${VENV}/bin/python" "${BACKEND_DIR}/scripts/ensure_database.py" 2>"${LOG_DIR}/db.log"; then
   cat "${LOG_DIR}/db.log" >&2
   fail "could not reach PostgreSQL. Check that it is running and that DATABASE_URL in backend/.env is correct."
 fi

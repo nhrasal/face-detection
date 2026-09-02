@@ -6,16 +6,16 @@ backend/calibration/data/
 backend/tests/assets/*
 !backend/tests/assets/.gitkeep
 
-# --- model weights (fetched by scripts/download_models.sh) -------------------
+# --- model weights (fetched by backend/scripts/download_models.sh) -------------------
 # Not committed: ~40MB for the default pair, and the opt-in buffalo_l weights
 # are non-commercial-research licensed and must not live in a distributable
 # artifact.
 #
-# Note `models/*` and not `models/` — git cannot re-include a file whose parent
-# directory is excluded, so a bare `models/` would make the .gitkeep negation
+# Note `backend/models/*` and not `backend/models/` — git cannot re-include a file whose parent
+# directory is excluded, so a bare `backend/models/` would make the .gitkeep negation
 # below silently dead.
-models/*
-!models/.gitkeep
+backend/models/*
+!backend/models/.gitkeep
 
 # --- python ------------------------------------------------------------------
 backend/.venv/

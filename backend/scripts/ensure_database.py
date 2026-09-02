@@ -14,7 +14,7 @@ from pathlib import Path
 import psycopg
 from sqlalchemy.engine import make_url
 
-ENV_FILE = Path(__file__).resolve().parent.parent / "backend" / ".env"
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
 def database_url() -> str:

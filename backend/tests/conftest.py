@@ -11,7 +11,7 @@ import pytest
 
 from app.core.config import Settings, get_settings
 
-MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
+MODEL_DIR = Path(__file__).resolve().parents[1] / "models"
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 
 
