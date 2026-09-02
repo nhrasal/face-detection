@@ -7,6 +7,15 @@ This is **face verification**, not KYC. See
 [`face_verification_kyc_roadmap.md`](./face_verification_kyc_roadmap.md) for the
 V1→V5 product roadmap; KYC is V4 and reuses this engine.
 
+**Planning note for that V4 step:**
+[Storing Faces for KYC](https://claude.ai/code/artifact/50cd2446-33c8-4e77-9b6c-656ee06f82e9).
+The service stores profile *images* today and never keeps a face template — it
+re-embeds on every verification and drops the embedding immediately. KYC changes
+that, and the note covers what follows: why multi-pose enrollment multiplies false
+accepts unless the threshold is re-fitted, why the quality gate rejects profile
+captures at `yaw_symmetry < 0.15`, the three gates that block financial KYC
+(calibration, anti-spoofing, legal basis), and the schema. Private until shared.
+
 ## Status
 
 **Phases 1–10 of 15 complete.** The first working end-to-end system is now complete,
